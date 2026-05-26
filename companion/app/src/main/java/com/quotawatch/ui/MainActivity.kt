@@ -1,0 +1,289 @@
+package com.quotawatch.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.quotawatch.api.ApiKeys
+import com.quotawatch.api.Quota
+import com.quotawatch.api.QuotaResult
+import com.quotawatch.ble.BleClient
+
+class MainActivity : ComponentActivity() {
+    private val vm: QuotaViewModel by viewModels()
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {}
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestBlePermissions()
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                QuotaWatchScreen(vm)
+            }
+        }
+    }
+
+    private fun requestBlePermissions() {
+        val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_SCAN)
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        val needed = perms.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QuotaWatchScreen(vm: QuotaViewModel) {
+    val snapshot by vm.quotas.collectAsStateWithLifecycle()
+    val bleState by vm.bleClient.state.collectAsStateWithLifecycle()
+    val keys by vm.apiKeys.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    var showSettings by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("QuotaWatch") },
+                actions = {
+                    TextButton(onClick = { showSettings = !showSettings }) {
+                        Text(if (showSettings) "Hide" else "Settings",
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            BleCard(bleState, onConnect = vm::connectBle, onDisconnect = vm::disconnectBle)
+
+            if (showSettings) {
+                ApiKeySettings(keys, vm::updateApiKeys)
+            }
+
+            Button(
+                onClick = vm::refresh,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !refreshing
+            ) {
+                if (refreshing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("Refresh Quotas")
+            }
+
+            // Show successful quotas
+            snapshot.quotas.forEach { QuotaCard(it) }
+
+            // Show errors
+            snapshot.errors.forEach { err ->
+                ErrorCard(err.service, err.message)
+            }
+
+            // Show unavailable services
+            snapshot.unavailable.forEach { u ->
+                UnavailableCard(u.service, u.reason)
+            }
+
+            if (snapshot.results.isEmpty()) {
+                Text(
+                    "Add a GitHub classic token (with 'user' scope) and tap Refresh.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("M5 Connection", fontWeight = FontWeight.Bold)
+                Text(
+                    when (state) {
+                        is BleClient.State.Disconnected -> "Not connected"
+                        is BleClient.State.Scanning -> "Scanning..."
+                        is BleClient.State.Connecting -> "Connecting..."
+                        is BleClient.State.Connected -> "Connected"
+                        is BleClient.State.Error -> state.message
+                    },
+                    fontSize = 13.sp,
+                    color = when (state) {
+                        is BleClient.State.Connected -> Color(0xFF4CAF50)
+                        is BleClient.State.Error -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+            when (state) {
+                is BleClient.State.Connected ->
+                    OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
+                is BleClient.State.Scanning, is BleClient.State.Connecting ->
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                else ->
+                    Button(onClick = onConnect) { Text("Connect") }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuotaCard(quota: Quota) {
+    val barColor = when {
+        quota.limit <= 0 -> Color(0xFF4CAF50) // no limit = just show value
+        quota.percent < 0.5f -> Color(0xFF4CAF50)
+        quota.percent < 0.75f -> Color(0xFFFFEB3B)
+        quota.percent < 0.9f -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(quota.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    when {
+                        quota.unit == "$" -> "${"$"}${"%.2f".format(quota.used)}"
+                        quota.limit > 0 -> "${quota.used.toInt()} / ${quota.limit.toInt()} ${quota.unit}"
+                        else -> "${quota.used.toInt()} ${quota.unit}"
+                    },
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (quota.limit > 0) {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(12.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        Modifier.fillMaxHeight().fillMaxWidth(quota.percent)
+                            .clip(RoundedCornerShape(6.dp)).background(barColor)
+                    )
+                }
+                Text(
+                    "${"%.0f".format(quota.percent * 100)}%",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ErrorCard(service: String, message: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(service, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+        }
+    }
+}
+
+@Composable
+fun UnavailableCard(service: String, reason: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(service, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(reason, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun ApiKeySettings(keys: ApiKeys, onUpdate: (ApiKeys) -> Unit) {
+    var claudeToken by remember(keys) { mutableStateOf(keys.claudeOAuthToken ?: "") }
+    var githubToken by remember(keys) { mutableStateOf(keys.githubToken ?: "") }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Settings", fontWeight = FontWeight.Bold)
+
+            OutlinedTextField(
+                value = claudeToken,
+                onValueChange = {
+                    claudeToken = it
+                    onUpdate(keys.copy(claudeOAuthToken = it.ifBlank { null }))
+                },
+                label = { Text("Claude OAuth Token") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text(
+                "From ~/.claude/.credentials.json → accessToken (sk-ant-oat...)",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            OutlinedTextField(
+                value = githubToken,
+                onValueChange = {
+                    githubToken = it
+                    onUpdate(keys.copy(githubToken = it.ifBlank { null }))
+                },
+                label = { Text("GitHub Classic Token") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text(
+                "Classic token (ghp_...) with 'user' scope. Shows Actions + Copilot.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}

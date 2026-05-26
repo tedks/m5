@@ -1,0 +1,12 @@
+.direnv/
+.venv/
+result
+.pio/
+.platformio/
+M5Nemo-*.bin
+companion/local.properties
+companion/.gradle/
+companion/app/build/
+companion/wear/build/
+companion/build/
+tokens
