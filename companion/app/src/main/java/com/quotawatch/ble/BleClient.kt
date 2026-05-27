@@ -7,6 +7,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,8 +71,16 @@ class BleClient(private val context: Context) {
         val char = quotaCharacteristic ?: return false
         val g = gatt ?: return false
 
-        char.value = data
-        return g.writeCharacteristic(char)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(
+                char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            char.value = data
+            @Suppress("DEPRECATION")
+            g.writeCharacteristic(char)
+        }
     }
 
     private val scanCallback = object : ScanCallback() {

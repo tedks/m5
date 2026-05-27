@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +67,7 @@ fun QuotaWatchScreen(vm: QuotaViewModel) {
     val bleState by vm.bleClient.state.collectAsStateWithLifecycle()
     val keys by vm.apiKeys.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val autoRefresh by vm.autoRefreshEnabled.collectAsStateWithLifecycle()
     var showSettings by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -95,16 +97,33 @@ fun QuotaWatchScreen(vm: QuotaViewModel) {
                 ApiKeySettings(keys, vm::updateApiKeys)
             }
 
-            Button(
-                onClick = vm::refresh,
+            // Refresh controls
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !refreshing
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (refreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = vm::refresh,
+                    modifier = Modifier.weight(1f),
+                    enabled = !refreshing
+                ) {
+                    if (refreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Refresh")
                 }
-                Text("Refresh Quotas")
+                FilterChip(
+                    selected = autoRefresh,
+                    onClick = vm::toggleAutoRefresh,
+                    label = { Text("Auto", fontSize = 13.sp) }
+                )
+            }
+
+            // Last updated
+            if (snapshot.timestamp > 0) {
+                LastUpdatedText(snapshot.timestamp)
             }
 
             // Show successful quotas
@@ -129,6 +148,30 @@ fun QuotaWatchScreen(vm: QuotaViewModel) {
             }
         }
     }
+}
+
+@Composable
+fun LastUpdatedText(timestamp: Long) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(10_000)
+        }
+    }
+    val ago = (now - timestamp) / 1000
+    val text = when {
+        ago < 5 -> "just now"
+        ago < 60 -> "${ago}s ago"
+        ago < 3600 -> "${ago / 60}m ago"
+        else -> "${ago / 3600}h ago"
+    }
+    Text(
+        "Updated $text",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable
