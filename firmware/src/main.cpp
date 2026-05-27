@@ -108,10 +108,11 @@ static void drawQuotaRow(int idx, int y) {
     float pct = (q->limit > 0) ? (q->used / q->limit) : 0.0f;
     if (pct > 1.0f) pct = 1.0f;
 
-    int barX = 70;
-    int barW = 120;
+    int barX = 60;
+    int barW = 95;
     int barH = 14;
     int barY = y + 6;
+    int textX = barX + barW + 4;
 
     // Clear row area
     M5.Lcd.fillRect(0, y, SCREEN_W, 28, C_BG);
@@ -120,7 +121,7 @@ static void drawQuotaRow(int idx, int y) {
     M5.Lcd.setTextFont(2);
     M5.Lcd.setTextSize(1);
     M5.Lcd.setTextColor(C_TEXT, C_BG);
-    M5.Lcd.setCursor(6, y + 4);
+    M5.Lcd.setCursor(4, y + 4);
     M5.Lcd.print(q->name);
 
     // Progress bar background
@@ -132,16 +133,17 @@ static void drawQuotaRow(int idx, int y) {
         M5.Lcd.fillRect(barX, barY, fillW, barH, barColor(pct));
     }
 
-    // Percentage or value text
+    // Value text — fits "9999/3000" comfortably in 81px
     char txt[24];
     if (strcmp(q->unit, "%") == 0) {
         snprintf(txt, sizeof(txt), "%d%%", (int)(pct * 100));
+    } else if (q->limit > 0) {
+        snprintf(txt, sizeof(txt), "%.0f/%.0f", q->used, q->limit);
     } else {
-        snprintf(txt, sizeof(txt), "%.0f/%s%.0f",
-                 q->used, (q->limit >= 1000) ? "" : "", q->limit);
+        snprintf(txt, sizeof(txt), "%.0f %s", q->used, q->unit);
     }
     M5.Lcd.setTextColor(C_TEXT, C_BG);
-    M5.Lcd.setCursor(barX + barW + 6, y + 4);
+    M5.Lcd.setCursor(textX, y + 4);
     M5.Lcd.print(txt);
 }
 
