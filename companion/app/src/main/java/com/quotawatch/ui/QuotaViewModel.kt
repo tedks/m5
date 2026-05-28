@@ -1,6 +1,7 @@
 package com.quotawatch.ui
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,8 +30,11 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
 
     val bleClient = BleClient(app)
     private val wearSync = WearSync(app)
-    val fetcher = QuotaFetcher(app)
     private val keyStore = KeyStore(app)
+
+    // Fetcher is lazily recreated with Activity context when available
+    private var _fetcher: QuotaFetcher? = null
+    val fetcher: QuotaFetcher get() = _fetcher ?: QuotaFetcher(getApplication<Application>()).also { _fetcher = it }
 
     val apiKeys: StateFlow<ApiKeys> = keyStore.keys
         .stateIn(viewModelScope, SharingStarted.Eagerly, ApiKeys())
@@ -50,6 +54,11 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
         startAutoRefresh()
     }
 
+    /** Call from Activity.onCreate to provide Activity context for WebView scraping. */
+    fun setActivityContext(context: Context) {
+        _fetcher = QuotaFetcher(context)
+    }
+
     fun updateApiKeys(keys: ApiKeys) {
         viewModelScope.launch { keyStore.save(keys) }
     }
@@ -66,7 +75,7 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     private fun startAutoRefresh() {
         autoRefreshJob?.cancel()
         autoRefreshJob = viewModelScope.launch {
-            delay(2000) // wait for keys to load + WebView init
+            delay(3000) // wait for Activity context + keys to load
             doRefresh()
             while (true) {
                 delay(AUTO_REFRESH_INTERVAL_MS)
@@ -83,7 +92,6 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
         if (_refreshing.value) return
         _refreshing.value = true
         try {
-            // Scrapers need main thread for WebView, GitHub needs IO
             val snapshot = fetcher.fetchAll(apiKeys.value)
             _quotas.value = snapshot
 

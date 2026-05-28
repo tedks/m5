@@ -44,6 +44,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Give the scraper an Activity context so WebViews can render
+        vm.setActivityContext(this)
         requestBlePermissions()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {

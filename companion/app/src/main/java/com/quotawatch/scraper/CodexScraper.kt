@@ -30,7 +30,7 @@ class CodexScraper(context: Context) {
 
             val jsonStr = raw.trim().removeSurrounding("\"").replace("\\\"", "\"")
                 .replace("\\n", "\n").replace("\\\\", "\\")
-            Log.d(TAG, "Parsed: $jsonStr")
+            Log.d(TAG, "Parsed: ${jsonStr.take(300)}")
 
             val json = JSONObject(jsonStr)
 
@@ -38,58 +38,45 @@ class CodexScraper(context: Context) {
                 return QuotaResult.Error("Codex", json.getString("error"))
             }
 
-            val pct = json.optDouble("usagePct", -1.0)
-            if (pct >= 0) {
-                QuotaResult.Success(Quota("Codex", pct.toFloat(), 100f, "%"))
-            } else {
-                val text = json.optString("text", "")
-                QuotaResult.Error("Codex", "Could not parse usage. Page text: ${text.take(200)}")
+            // Page shows "X% remaining" — we want "used"
+            val fiveHourRemaining = json.optDouble("fiveHourRemaining", -1.0)
+            if (fiveHourRemaining >= 0) {
+                val used = (100.0 - fiveHourRemaining).toFloat()
+                return QuotaResult.Success(Quota("Codex", used, 100f, "%"))
             }
+
+            val text = json.optString("text", "")
+            QuotaResult.Error("Codex", "Could not parse. Text: ${text.take(200)}")
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
             QuotaResult.Error("Codex", e.message ?: "Scrape failed")
         }
     }
 
+    // The Codex analytics page shows:
+    //   "5 hour usage limit\n\n100%\nremaining\n\nWeekly usage limit\n\n94%\nremaining"
+    // Parse these "remaining" percentages.
     private val JS_EXTRACT = """
         (function() {
             try {
                 var text = document.body.innerText || '';
-                var bars = document.querySelectorAll('[role="progressbar"]');
-                var barData = [];
-                bars.forEach(function(b) {
-                    barData.push({
-                        value: b.getAttribute('aria-valuenow'),
-                        max: b.getAttribute('aria-valuemax'),
-                        label: b.getAttribute('aria-label') || ''
-                    });
-                });
-                var pctMatches = text.match(/(\d+(?:\.\d+)?)\s*%/g) || [];
-                var usagePct = -1;
-                for (var i = 0; i < barData.length; i++) {
-                    var val = parseFloat(barData[i].value);
-                    if (!isNaN(val) && usagePct < 0) {
-                        usagePct = val;
-                    }
+                var fiveHourRemaining = -1;
+                var weeklyRemaining = -1;
+
+                // Parse "5 hour usage limit\n\nX%\nremaining"
+                var fiveMatch = text.match(/5\s*hour\s*usage\s*limit\s*[\n\s]*(\d+(?:\.\d+)?)\s*%\s*[\n\s]*remaining/i);
+                if (fiveMatch) {
+                    fiveHourRemaining = parseFloat(fiveMatch[1]);
                 }
-                if (usagePct < 0) {
-                    var lines = text.split('\n');
-                    for (var j = 0; j < lines.length; j++) {
-                        var line = lines[j].toLowerCase();
-                        var m = line.match(/(\d+(?:\.\d+)?)\s*%/);
-                        if (m && (line.includes('usage') || line.includes('limit') || line.includes('used') || line.includes('quota'))) {
-                            usagePct = parseFloat(m[1]);
-                            break;
-                        }
-                    }
-                    if (usagePct < 0 && pctMatches.length > 0) {
-                        usagePct = parseFloat(pctMatches[0]);
-                    }
+
+                var weekMatch = text.match(/weekly\s*usage\s*limit\s*[\n\s]*(\d+(?:\.\d+)?)\s*%\s*[\n\s]*remaining/i);
+                if (weekMatch) {
+                    weeklyRemaining = parseFloat(weekMatch[1]);
                 }
+
                 return JSON.stringify({
-                    usagePct: usagePct,
-                    bars: barData,
-                    percentages: pctMatches,
+                    fiveHourRemaining: fiveHourRemaining,
+                    weeklyRemaining: weeklyRemaining,
                     text: text.substring(0, 1000)
                 });
             } catch(e) {
