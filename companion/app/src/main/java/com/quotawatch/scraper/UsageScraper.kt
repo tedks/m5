@@ -25,8 +25,12 @@ class UsageScraper(private val context: Context) {
         const val TAG = "UsageScraper"
         const val INJECT_DELAY_MS = 4000L
         const val TIMEOUT_MS = 45000L
+        const val MAX_RETRIES = 1
         const val CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+        // Login page patterns — if we land here, the session expired
+        private val LOGIN_PATTERNS = listOf("/login", "/auth", "/signin", "/oauth")
     }
 
     private fun getActivityContext(): Context {
@@ -38,72 +42,99 @@ class UsageScraper(private val context: Context) {
         return context
     }
 
+    data class ScrapeResult(
+        val data: String?,
+        val sessionExpired: Boolean = false
+    )
+
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun scrape(url: String, js: String): String? = withContext(Dispatchers.Main) {
-        val result = CompletableDeferred<String?>()
-        val handler = Handler(Looper.getMainLooper())
+    suspend fun scrape(url: String, js: String, retryCount: Int = 0): ScrapeResult =
+        withContext(Dispatchers.Main) {
+            val result = CompletableDeferred<ScrapeResult>()
+            val handler = Handler(Looper.getMainLooper())
 
-        Log.d(TAG, "=== Scraping $url ===")
+            Log.d(TAG, "Scraping $url (attempt ${retryCount + 1})")
 
-        val webContext = getActivityContext()
-        val webView = WebView(webContext).apply {
-            layoutParams = ViewGroup.LayoutParams(1, 1)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.databaseEnabled = true
-            settings.userAgentString = CHROME_UA
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            val webContext = getActivityContext()
+            val webView = WebView(webContext).apply {
+                layoutParams = ViewGroup.LayoutParams(1, 1)
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.databaseEnabled = true
+                settings.userAgentString = CHROME_UA
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-            CookieManager.getInstance().setAcceptCookie(true)
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-        }
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            }
 
-        // Debounce: each onPageFinished resets the inject timer.
-        // This way we wait for the LAST page load (after redirects).
-        var pendingInject: Runnable? = null
+            var pendingInject: Runnable? = null
 
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView, finishedUrl: String) {
-                Log.d(TAG, "onPageFinished: $finishedUrl")
+            webView.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, finishedUrl: String) {
+                    Log.d(TAG, "onPageFinished: $finishedUrl")
 
-                // Cancel any pending inject from a previous onPageFinished
-                pendingInject?.let { handler.removeCallbacks(it) }
+                    // Detect login redirects (session expired)
+                    if (LOGIN_PATTERNS.any { finishedUrl.contains(it, ignoreCase = true) }) {
+                        Log.w(TAG, "Redirected to login — session expired")
+                        if (!result.isCompleted) {
+                            result.complete(ScrapeResult(null, sessionExpired = true))
+                        }
+                        return
+                    }
 
-                // Schedule new inject
-                val inject = Runnable {
-                    Log.d(TAG, "Injecting JS into $finishedUrl")
-                    view.evaluateJavascript(js) { jsResult ->
-                        Log.d(TAG, "JS callback: ${jsResult?.take(300)}")
-                        if (!result.isCompleted) result.complete(jsResult)
+                    pendingInject?.let { handler.removeCallbacks(it) }
+
+                    val inject = Runnable {
+                        view.evaluateJavascript(js) { jsResult ->
+                            Log.d(TAG, "JS result: ${jsResult?.take(200)}")
+                            if (!result.isCompleted) {
+                                result.complete(ScrapeResult(jsResult))
+                            }
+                        }
+                    }
+                    pendingInject = inject
+                    handler.postDelayed(inject, INJECT_DELAY_MS)
+                }
+
+                override fun onReceivedError(
+                    view: WebView, request: WebResourceRequest, error: WebResourceError
+                ) {
+                    if (request.isForMainFrame) {
+                        Log.e(TAG, "Error: ${error.errorCode} ${error.description}")
+                        if (!result.isCompleted) result.complete(ScrapeResult(null))
                     }
                 }
-                pendingInject = inject
-                handler.postDelayed(inject, INJECT_DELAY_MS)
             }
 
-            override fun onReceivedError(
-                view: WebView, request: WebResourceRequest, error: WebResourceError
-            ) {
-                if (request.isForMainFrame) {
-                    Log.e(TAG, "Error: ${error.errorCode} ${error.description} at ${request.url}")
-                    if (!result.isCompleted) result.complete(null)
-                }
+            webView.loadUrl(url)
+
+            val scraped = withTimeoutOrNull(TIMEOUT_MS) { result.await() }
+                ?: ScrapeResult(null)
+
+            pendingInject?.let { handler.removeCallbacks(it) }
+            webView.stopLoading()
+            webView.destroy()
+
+            // Retry on transient failure (not session expiry)
+            if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
+                Log.d(TAG, "Retrying $url...")
+                return@withContext scrape(url, js, retryCount + 1)
             }
+
+            scraped
         }
-
-        webView.loadUrl(url)
-
-        val scraped = withTimeoutOrNull(TIMEOUT_MS) { result.await() }
-        if (scraped == null) Log.w(TAG, "Timed out for $url")
-        pendingInject?.let { handler.removeCallbacks(it) }
-        webView.stopLoading()
-        webView.destroy()
-        scraped
-    }
 
     fun hasSession(url: String): Boolean {
         val cookies = CookieManager.getInstance().getCookie(url)
         return !cookies.isNullOrBlank()
+    }
+
+    fun clearSession(url: String) {
+        CookieManager.getInstance().apply {
+            setCookie(url, "")
+            flush()
+        }
     }
 }

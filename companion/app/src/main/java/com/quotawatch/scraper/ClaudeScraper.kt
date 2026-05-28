@@ -19,19 +19,21 @@ class ClaudeScraper(context: Context) {
 
     suspend fun fetchUsage(): QuotaResult {
         if (!isLoggedIn()) {
-            return QuotaResult.Unavailable("Claude", "Tap 'Log in to Claude' in Settings")
+            return QuotaResult.Unavailable("Claude", "Tap 'Log in' next to Claude Code in Settings")
         }
 
         return try {
-            val raw = scraper.scrape(USAGE_URL, JS_EXTRACT)
-            if (raw == null) {
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT)
+            if (result.sessionExpired) {
+                return QuotaResult.Unavailable("Claude", "Session expired — tap 'Re-login' in Settings")
+            }
+            if (result.data == null) {
                 return QuotaResult.Error("Claude", "Page load timed out")
             }
 
-            // JS returns a JSON string wrapped in quotes — strip them
-            val jsonStr = raw.trim().removeSurrounding("\"").replace("\\\"", "\"")
+            val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
                 .replace("\\n", "\n").replace("\\\\", "\\")
-            Log.d(TAG, "Parsed: $jsonStr")
+            Log.d(TAG, "Parsed: ${jsonStr.take(200)}")
 
             val json = JSONObject(jsonStr)
 
