@@ -3,6 +3,7 @@ package com.quotawatch.api
 import android.content.Context
 import android.util.Log
 import com.quotawatch.scraper.ClaudeScraper
+import com.quotawatch.scraper.CodexScraper
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -20,11 +21,13 @@ class QuotaFetcher(context: Context) {
         .build()
 
     private val claudeScraper = ClaudeScraper(context)
+    private val codexScraper = CodexScraper(context)
 
     suspend fun fetchAll(keys: ApiKeys): QuotaSnapshot {
         val results = mutableListOf<QuotaResult>()
 
         results.add(claudeScraper.fetchUsage())
+        results.add(codexScraper.fetchUsage())
 
         if (keys.githubToken != null) {
             results.addAll(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -36,6 +39,7 @@ class QuotaFetcher(context: Context) {
     }
 
     fun isClaudeLoggedIn(): Boolean = claudeScraper.isLoggedIn()
+    fun isCodexLoggedIn(): Boolean = codexScraper.isLoggedIn()
 
     private fun fetchGitHubActions(token: String): List<QuotaResult> {
         try {

@@ -157,8 +157,10 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
                 SettingsCard(
                     keys = keys,
                     claudeLoggedIn = vm.fetcher.isClaudeLoggedIn(),
+                    codexLoggedIn = vm.fetcher.isCodexLoggedIn(),
                     onUpdateKeys = vm::updateApiKeys,
-                    onLoginClaude = { onLogin("https://claude.ai/settings/usage") }
+                    onLoginClaude = { onLogin("https://claude.ai/settings/usage") },
+                    onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/analytics#usage") }
                 )
             }
 
@@ -196,7 +198,7 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
 
             if (snapshot.results.isEmpty()) {
                 Text(
-                    "Log in to Claude and add a GitHub token, then tap Refresh.",
+                    "Log in to Claude/Codex and add a GitHub token, then tap Refresh.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 16.dp)
                 )
@@ -243,8 +245,10 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
 fun SettingsCard(
     keys: ApiKeys,
     claudeLoggedIn: Boolean,
+    codexLoggedIn: Boolean,
     onUpdateKeys: (ApiKeys) -> Unit,
-    onLoginClaude: () -> Unit
+    onLoginClaude: () -> Unit,
+    onLoginCodex: () -> Unit
 ) {
     var githubToken by remember(keys) { mutableStateOf(keys.githubToken ?: "") }
 
@@ -268,6 +272,22 @@ fun SettingsCard(
                 }
                 OutlinedButton(onClick = onLoginClaude) {
                     Text(if (claudeLoggedIn) "Re-login" else "Log in")
+                }
+            }
+
+            // Codex login
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Codex", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (codexLoggedIn) "Logged in" else "Not logged in",
+                        fontSize = 12.sp,
+                        color = if (codexLoggedIn) Color(0xFF4CAF50)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(onClick = onLoginCodex) {
+                    Text(if (codexLoggedIn) "Re-login" else "Log in")
                 }
             }
 
