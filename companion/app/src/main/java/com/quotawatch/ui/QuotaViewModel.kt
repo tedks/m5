@@ -1,6 +1,7 @@
 package com.quotawatch.ui
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,13 +25,16 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val TAG = "QuotaViewModel"
-        const val AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+        const val AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
     }
 
     val bleClient = BleClient(app)
     private val wearSync = WearSync(app)
-    private val fetcher = QuotaFetcher()
     private val keyStore = KeyStore(app)
+
+    // Fetcher is lazily recreated with Activity context when available
+    private var _fetcher: QuotaFetcher? = null
+    val fetcher: QuotaFetcher get() = _fetcher ?: QuotaFetcher(getApplication<Application>()).also { _fetcher = it }
 
     val apiKeys: StateFlow<ApiKeys> = keyStore.keys
         .stateIn(viewModelScope, SharingStarted.Eagerly, ApiKeys())
@@ -50,10 +54,13 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
         startAutoRefresh()
     }
 
+    /** Call from Activity.onCreate to provide Activity context for WebView scraping. */
+    fun setActivityContext(context: Context) {
+        _fetcher = QuotaFetcher(context)
+    }
+
     fun updateApiKeys(keys: ApiKeys) {
-        viewModelScope.launch {
-            keyStore.save(keys)
-        }
+        viewModelScope.launch { keyStore.save(keys) }
     }
 
     fun connectBle() { bleClient.scan() }
@@ -61,26 +68,18 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleAutoRefresh() {
         _autoRefreshEnabled.value = !_autoRefreshEnabled.value
-        if (_autoRefreshEnabled.value) {
-            startAutoRefresh()
-        } else {
-            autoRefreshJob?.cancel()
-            autoRefreshJob = null
-        }
+        if (_autoRefreshEnabled.value) startAutoRefresh()
+        else { autoRefreshJob?.cancel(); autoRefreshJob = null }
     }
 
     private fun startAutoRefresh() {
         autoRefreshJob?.cancel()
         autoRefreshJob = viewModelScope.launch {
-            // Initial fetch on startup (short delay for keys to load from DataStore)
-            delay(1000)
+            delay(3000) // wait for Activity context + keys to load
             doRefresh()
-
             while (true) {
                 delay(AUTO_REFRESH_INTERVAL_MS)
-                if (_autoRefreshEnabled.value) {
-                    doRefresh()
-                }
+                if (_autoRefreshEnabled.value) doRefresh()
             }
         }
     }
@@ -90,12 +89,10 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun doRefresh() {
-        if (_refreshing.value) return // skip if already refreshing
+        if (_refreshing.value) return
         _refreshing.value = true
         try {
-            val snapshot = withContext(Dispatchers.IO) {
-                fetcher.fetchAll(apiKeys.value)
-            }
+            val snapshot = fetcher.fetchAll(apiKeys.value)
             _quotas.value = snapshot
 
             if (bleClient.state.value is BleClient.State.Connected) {

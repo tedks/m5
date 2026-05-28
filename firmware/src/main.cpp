@@ -44,7 +44,7 @@ static BLEServer* pServer = nullptr;
 
 // --- Parsing ---
 // Protocol: newline-separated lines of "Name:used:limit:unit"
-// Example: "Claude:75:100:%\nCodex:4.20:10.00:$\nActions:305:3000:min"
+// Example: "Claude:17:100:%\nCodex:42:100:%\nActions:465:3000:min"
 
 static void parseQuotaData(const char* data, size_t len) {
     char buf[512];

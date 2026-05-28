@@ -14,29 +14,17 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class KeyStore(private val context: Context) {
 
     companion object {
-        private val CLAUDE_OAUTH_TOKEN = stringPreferencesKey("claude_oauth_token")
         private val GITHUB_TOKEN = stringPreferencesKey("github_token")
     }
 
     val keys: Flow<ApiKeys> = context.dataStore.data.map { prefs ->
-        ApiKeys(
-            claudeOAuthToken = prefs[CLAUDE_OAUTH_TOKEN],
-            githubToken = prefs[GITHUB_TOKEN]
-        )
+        ApiKeys(githubToken = prefs[GITHUB_TOKEN])
     }
 
     suspend fun save(keys: ApiKeys) {
         context.dataStore.edit { prefs ->
-            setOrRemove(prefs, CLAUDE_OAUTH_TOKEN, keys.claudeOAuthToken)
-            setOrRemove(prefs, GITHUB_TOKEN, keys.githubToken)
+            if (keys.githubToken != null) prefs[GITHUB_TOKEN] = keys.githubToken
+            else prefs.remove(GITHUB_TOKEN)
         }
-    }
-
-    private fun setOrRemove(
-        prefs: androidx.datastore.preferences.core.MutablePreferences,
-        key: Preferences.Key<String>,
-        value: String?
-    ) {
-        if (value != null) prefs[key] = value else prefs.remove(key)
     }
 }
