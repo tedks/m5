@@ -13,6 +13,8 @@
     <application
         android:name=".QuotaWatchApp"
         android:label="QuotaWatch"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.QuotaWatch"
         android:supportsRtl="true">
 

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Gauge arc background -->
+    <path
+        android:pathData="M30,70 A28,28 0 1,1 78,70"
+        android:strokeWidth="5"
+        android:strokeColor="#444444"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round" />
+
+    <!-- Gauge arc filled (green to yellow) -->
+    <path
+        android:pathData="M30,70 A28,28 0 0,1 54,42.5"
+        android:strokeWidth="5"
+        android:strokeColor="#4CAF50"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round" />
+
+    <!-- Needle -->
+    <path
+        android:pathData="M54,68 L48,48"
+        android:strokeWidth="3"
+        android:strokeColor="#FFFFFF"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round" />
+
+    <!-- Center dot -->
+    <path
+        android:pathData="M54,68 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"
+        android:fillColor="#FFFFFF" />
+
+    <!-- "Q" text -->
+    <path
+        android:pathData="M46,82 L62,82"
+        android:strokeWidth="2"
+        android:strokeColor="#AAAAAA"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round" />
+</vector>

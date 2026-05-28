@@ -8,6 +8,8 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,8 @@ class BleClient(private val context: Context) {
         const val TAG = "BleClient"
         val SERVICE_UUID: UUID = UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
         val QUOTA_CHAR_UUID: UUID = UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567891")
+        const val RECONNECT_DELAY_MS = 5000L
+        const val MAX_RECONNECT_ATTEMPTS = 3
     }
 
     sealed class State {
@@ -28,6 +32,7 @@ class BleClient(private val context: Context) {
         data object Scanning : State()
         data object Connecting : State()
         data object Connected : State()
+        data object Reconnecting : State()
         data class Error(val message: String) : State()
     }
 
@@ -39,6 +44,11 @@ class BleClient(private val context: Context) {
     private val bluetoothAdapter = bluetoothManager.adapter
     private var gatt: BluetoothGatt? = null
     private var quotaCharacteristic: BluetoothGattCharacteristic? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var autoReconnect = false
+    private var reconnectAttempts = 0
+    private var lastDeviceAddress: String? = null
 
     fun scan() {
         val scanner = bluetoothAdapter.bluetoothLeScanner ?: run {
@@ -46,6 +56,8 @@ class BleClient(private val context: Context) {
             return
         }
 
+        autoReconnect = true
+        reconnectAttempts = 0
         _state.value = State.Scanning
 
         val filter = ScanFilter.Builder()
@@ -60,6 +72,9 @@ class BleClient(private val context: Context) {
     }
 
     fun disconnect() {
+        autoReconnect = false
+        reconnectAttempts = 0
+        handler.removeCallbacksAndMessages(null)
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -83,16 +98,33 @@ class BleClient(private val context: Context) {
         }
     }
 
+    private fun attemptReconnect() {
+        if (!autoReconnect || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            _state.value = State.Disconnected
+            return
+        }
+
+        reconnectAttempts++
+        _state.value = State.Reconnecting
+        Log.d(TAG, "Reconnect attempt $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS")
+
+        val delay = RECONNECT_DELAY_MS * reconnectAttempts // exponential-ish backoff
+        handler.postDelayed({ scan() }, delay)
+    }
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            Log.d(TAG, "Found device: ${result.device.name} / ${result.device.address}")
+            Log.d(TAG, "Found: ${result.device.name} / ${result.device.address}")
             bluetoothAdapter.bluetoothLeScanner?.stopScan(this)
+            lastDeviceAddress = result.device.address
             _state.value = State.Connecting
             result.device.connectGatt(context, false, gattCallback)
         }
 
         override fun onScanFailed(errorCode: Int) {
-            _state.value = State.Error("Scan failed: $errorCode")
+            Log.e(TAG, "Scan failed: $errorCode")
+            if (autoReconnect) attemptReconnect()
+            else _state.value = State.Error("Scan failed: $errorCode")
         }
     }
 
@@ -101,12 +133,15 @@ class BleClient(private val context: Context) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     this@BleClient.gatt = gatt
+                    reconnectAttempts = 0
                     gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     this@BleClient.gatt = null
                     quotaCharacteristic = null
-                    _state.value = State.Disconnected
+                    gatt.close()
+                    if (autoReconnect) attemptReconnect()
+                    else _state.value = State.Disconnected
                 }
             }
         }
