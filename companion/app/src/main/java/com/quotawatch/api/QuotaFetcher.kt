@@ -1,51 +1,43 @@
 package com.quotawatch.api
 
+import android.content.Context
 import android.util.Log
+import com.quotawatch.scraper.ClaudeScraper
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class QuotaFetcher(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-) {
+class QuotaFetcher(context: Context) {
+
     companion object {
         const val TAG = "QuotaFetcher"
     }
 
-    private val claudeOAuth = ClaudeOAuth(client)
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
 
-    fun fetchAll(keys: ApiKeys): QuotaSnapshot {
+    private val claudeScraper = ClaudeScraper(context)
+
+    suspend fun fetchAll(keys: ApiKeys): QuotaSnapshot {
         val results = mutableListOf<QuotaResult>()
 
-        // Claude Code — OAuth usage endpoint
-        if (keys.claudeOAuthToken != null) {
-            results.add(claudeOAuth.fetchUsage(keys.claudeOAuthToken))
-        } else {
-            results.add(QuotaResult.Unavailable(
-                "Claude",
-                "Paste OAuth token from ~/.claude/.credentials.json (accessToken field)"
-            ))
-        }
+        results.add(claudeScraper.fetchUsage())
 
-        // Codex / ChatGPT Pro — no programmatic access for individual Pro subscribers
-        results.add(QuotaResult.Unavailable(
-            "Codex",
-            "ChatGPT Pro usage not exposed via any API. Enterprise-only."
-        ))
-
-        // GitHub — Actions + Copilot from billing summary
         if (keys.githubToken != null) {
-            results.addAll(fetchGitHub(keys.githubToken))
+            results.addAll(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fetchGitHubActions(keys.githubToken)
+            })
         }
 
         return QuotaSnapshot(results)
     }
 
-    private fun fetchGitHub(token: String): List<QuotaResult> {
+    fun isClaudeLoggedIn(): Boolean = claudeScraper.isLoggedIn()
+
+    private fun fetchGitHubActions(token: String): List<QuotaResult> {
         try {
             val username = fetchGitHubUsername(token)
 
@@ -71,28 +63,14 @@ class QuotaFetcher(
             val items = json.getJSONArray("usageItems")
 
             var actionMinutes = 0.0
-            var copilotRequests = 0.0
-
             for (i in 0 until items.length()) {
                 val item = items.getJSONObject(i)
-                val product = item.getString("product")
-                val sku = item.getString("sku")
-                val unitType = item.getString("unitType")
-                val quantity = item.getDouble("grossQuantity")
-
-                when {
-                    product == "Actions" && unitType == "minutes" -> actionMinutes += quantity
-                    product == "Copilot" && sku.contains("Premium") -> copilotRequests += quantity
+                if (item.getString("product") == "Actions" && item.getString("unitType") == "minutes") {
+                    actionMinutes += item.getDouble("grossQuantity")
                 }
             }
 
-            val results = mutableListOf<QuotaResult>()
-            results.add(QuotaResult.Success(Quota("Actions", actionMinutes.toFloat(), 3000f, "min")))
-            if (copilotRequests > 0) {
-                results.add(QuotaResult.Success(Quota("Copilot", copilotRequests.toFloat(), 0f, "req")))
-            }
-            return results
-
+            return listOf(QuotaResult.Success(Quota("Actions", actionMinutes.toFloat(), 3000f, "min")))
         } catch (e: Exception) {
             Log.e(TAG, "GitHub fetch failed", e)
             return listOf(QuotaResult.Error("GitHub", e.message ?: "Unknown error"))
@@ -113,7 +91,5 @@ class QuotaFetcher(
 }
 
 data class ApiKeys(
-    val claudeOAuthToken: String? = null,
-    val openaiAdminKey: String? = null,  // kept for future use
     val githubToken: String? = null
 )

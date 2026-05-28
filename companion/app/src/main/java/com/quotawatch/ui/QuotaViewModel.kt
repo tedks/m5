@@ -24,12 +24,12 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val TAG = "QuotaViewModel"
-        const val AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+        const val AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
     }
 
     val bleClient = BleClient(app)
     private val wearSync = WearSync(app)
-    private val fetcher = QuotaFetcher()
+    val fetcher = QuotaFetcher(app)
     private val keyStore = KeyStore(app)
 
     val apiKeys: StateFlow<ApiKeys> = keyStore.keys
@@ -51,9 +51,7 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateApiKeys(keys: ApiKeys) {
-        viewModelScope.launch {
-            keyStore.save(keys)
-        }
+        viewModelScope.launch { keyStore.save(keys) }
     }
 
     fun connectBle() { bleClient.scan() }
@@ -61,26 +59,18 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleAutoRefresh() {
         _autoRefreshEnabled.value = !_autoRefreshEnabled.value
-        if (_autoRefreshEnabled.value) {
-            startAutoRefresh()
-        } else {
-            autoRefreshJob?.cancel()
-            autoRefreshJob = null
-        }
+        if (_autoRefreshEnabled.value) startAutoRefresh()
+        else { autoRefreshJob?.cancel(); autoRefreshJob = null }
     }
 
     private fun startAutoRefresh() {
         autoRefreshJob?.cancel()
         autoRefreshJob = viewModelScope.launch {
-            // Initial fetch on startup (short delay for keys to load from DataStore)
-            delay(1000)
+            delay(2000) // wait for keys to load + WebView init
             doRefresh()
-
             while (true) {
                 delay(AUTO_REFRESH_INTERVAL_MS)
-                if (_autoRefreshEnabled.value) {
-                    doRefresh()
-                }
+                if (_autoRefreshEnabled.value) doRefresh()
             }
         }
     }
@@ -90,12 +80,11 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun doRefresh() {
-        if (_refreshing.value) return // skip if already refreshing
+        if (_refreshing.value) return
         _refreshing.value = true
         try {
-            val snapshot = withContext(Dispatchers.IO) {
-                fetcher.fetchAll(apiKeys.value)
-            }
+            // Scrapers need main thread for WebView, GitHub needs IO
+            val snapshot = fetcher.fetchAll(apiKeys.value)
             _quotas.value = snapshot
 
             if (bleClient.state.value is BleClient.State.Connected) {

@@ -1,9 +1,13 @@
 package com.quotawatch.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.webkit.CookieManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,12 +26,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.quotawatch.api.ApiKeys
 import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
 import com.quotawatch.ble.BleClient
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val vm: QuotaViewModel by viewModels()
@@ -42,7 +47,7 @@ class MainActivity : ComponentActivity() {
         requestBlePermissions()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                QuotaWatchScreen(vm)
+                QuotaWatchApp(vm)
             }
         }
     }
@@ -60,9 +65,64 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+fun QuotaWatchApp(vm: QuotaViewModel) {
+    var loginUrl by remember { mutableStateOf<String?>(null) }
+
+    if (loginUrl != null) {
+        LoginWebViewScreen(
+            url = loginUrl!!,
+            onDone = { loginUrl = null }
+        )
+    } else {
+        QuotaWatchScreen(vm, onLogin = { loginUrl = it })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun LoginWebViewScreen(url: String, onDone: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Log in") },
+                actions = {
+                    Button(onClick = onDone, modifier = Modifier.padding(end = 8.dp)) {
+                        Text("Done")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        AndroidView(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            factory = { context ->
+                WebView(context).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, finishedUrl: String) {
+                            // Flush cookies to persistent storage
+                            CookieManager.getInstance().flush()
+                        }
+                    }
+                    loadUrl(url)
+                }
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QuotaWatchScreen(vm: QuotaViewModel) {
+fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
     val snapshot by vm.quotas.collectAsStateWithLifecycle()
     val bleState by vm.bleClient.state.collectAsStateWithLifecycle()
     val keys by vm.apiKeys.collectAsStateWithLifecycle()
@@ -94,7 +154,12 @@ fun QuotaWatchScreen(vm: QuotaViewModel) {
             BleCard(bleState, onConnect = vm::connectBle, onDisconnect = vm::disconnectBle)
 
             if (showSettings) {
-                ApiKeySettings(keys, vm::updateApiKeys)
+                SettingsCard(
+                    keys = keys,
+                    claudeLoggedIn = vm.fetcher.isClaudeLoggedIn(),
+                    onUpdateKeys = vm::updateApiKeys,
+                    onLoginClaude = { onLogin("https://claude.ai/settings/usage") }
+                )
             }
 
             // Refresh controls
@@ -121,57 +186,23 @@ fun QuotaWatchScreen(vm: QuotaViewModel) {
                 )
             }
 
-            // Last updated
             if (snapshot.timestamp > 0) {
                 LastUpdatedText(snapshot.timestamp)
             }
 
-            // Show successful quotas
             snapshot.quotas.forEach { QuotaCard(it) }
-
-            // Show errors
-            snapshot.errors.forEach { err ->
-                ErrorCard(err.service, err.message)
-            }
-
-            // Show unavailable services
-            snapshot.unavailable.forEach { u ->
-                UnavailableCard(u.service, u.reason)
-            }
+            snapshot.errors.forEach { ErrorCard(it.service, it.message) }
+            snapshot.unavailable.forEach { UnavailableCard(it.service, it.reason) }
 
             if (snapshot.results.isEmpty()) {
                 Text(
-                    "Add a GitHub classic token (with 'user' scope) and tap Refresh.",
+                    "Log in to Claude and add a GitHub token, then tap Refresh.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 16.dp)
                 )
             }
         }
     }
-}
-
-@Composable
-fun LastUpdatedText(timestamp: Long) {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            kotlinx.coroutines.delay(10_000)
-        }
-    }
-    val ago = (now - timestamp) / 1000
-    val text = when {
-        ago < 5 -> "just now"
-        ago < 60 -> "${ago}s ago"
-        ago < 3600 -> "${ago / 60}m ago"
-        else -> "${ago / 3600}h ago"
-    }
-    Text(
-        "Updated $text",
-        fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth()
-    )
 }
 
 @Composable
@@ -209,9 +240,61 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
 }
 
 @Composable
+fun SettingsCard(
+    keys: ApiKeys,
+    claudeLoggedIn: Boolean,
+    onUpdateKeys: (ApiKeys) -> Unit,
+    onLoginClaude: () -> Unit
+) {
+    var githubToken by remember(keys) { mutableStateOf(keys.githubToken ?: "") }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Settings", fontWeight = FontWeight.Bold)
+
+            // Claude login
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Claude Code", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (claudeLoggedIn) "Logged in" else "Not logged in",
+                        fontSize = 12.sp,
+                        color = if (claudeLoggedIn) Color(0xFF4CAF50)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(onClick = onLoginClaude) {
+                    Text(if (claudeLoggedIn) "Re-login" else "Log in")
+                }
+            }
+
+            // GitHub token
+            OutlinedTextField(
+                value = githubToken,
+                onValueChange = {
+                    githubToken = it
+                    onUpdateKeys(keys.copy(githubToken = it.ifBlank { null }))
+                },
+                label = { Text("GitHub Classic Token") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Text(
+                "Classic token (ghp_...) with 'user' scope",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun QuotaCard(quota: Quota) {
     val barColor = when {
-        quota.limit <= 0 -> Color(0xFF4CAF50) // no limit = just show value
+        quota.limit <= 0 -> Color(0xFF4CAF50)
         quota.percent < 0.5f -> Color(0xFF4CAF50)
         quota.percent < 0.75f -> Color(0xFFFFEB3B)
         quota.percent < 0.9f -> Color(0xFFFF9800)
@@ -283,50 +366,25 @@ fun UnavailableCard(service: String, reason: String) {
 }
 
 @Composable
-fun ApiKeySettings(keys: ApiKeys, onUpdate: (ApiKeys) -> Unit) {
-    var claudeToken by remember(keys) { mutableStateOf(keys.claudeOAuthToken ?: "") }
-    var githubToken by remember(keys) { mutableStateOf(keys.githubToken ?: "") }
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Settings", fontWeight = FontWeight.Bold)
-
-            OutlinedTextField(
-                value = claudeToken,
-                onValueChange = {
-                    claudeToken = it
-                    onUpdate(keys.copy(claudeOAuthToken = it.ifBlank { null }))
-                },
-                label = { Text("Claude OAuth Token") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Text(
-                "From ~/.claude/.credentials.json → accessToken (sk-ant-oat...)",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(Modifier.height(4.dp))
-
-            OutlinedTextField(
-                value = githubToken,
-                onValueChange = {
-                    githubToken = it
-                    onUpdate(keys.copy(githubToken = it.ifBlank { null }))
-                },
-                label = { Text("GitHub Classic Token") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Text(
-                "Classic token (ghp_...) with 'user' scope. Shows Actions + Copilot.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+fun LastUpdatedText(timestamp: Long) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(10_000)
         }
     }
+    val ago = (now - timestamp) / 1000
+    val text = when {
+        ago < 5 -> "just now"
+        ago < 60 -> "${ago}s ago"
+        ago < 3600 -> "${ago / 60}m ago"
+        else -> "${ago / 3600}h ago"
+    }
+    Text(
+        "Updated $text",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
