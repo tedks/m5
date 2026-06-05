@@ -19,16 +19,19 @@ class CodexScraper(context: Context) {
 
     suspend fun fetchUsage(): QuotaResult {
         if (!isLoggedIn()) {
-            return QuotaResult.Unavailable("Codex", "Tap 'Log in to Codex' in Settings")
+            return QuotaResult.Unavailable("Codex", "Tap 'Log in' next to Codex in Settings")
         }
 
         return try {
-            val raw = scraper.scrape(USAGE_URL, JS_EXTRACT)
-            if (raw == null) {
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT)
+            if (result.sessionExpired) {
+                return QuotaResult.Unavailable("Codex", "Session expired — tap 'Re-login' in Settings")
+            }
+            if (result.data == null) {
                 return QuotaResult.Error("Codex", "Page load timed out")
             }
 
-            val jsonStr = raw.trim().removeSurrounding("\"").replace("\\\"", "\"")
+            val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
                 .replace("\\n", "\n").replace("\\\\", "\\")
             Log.d(TAG, "Parsed: ${jsonStr.take(300)}")
 

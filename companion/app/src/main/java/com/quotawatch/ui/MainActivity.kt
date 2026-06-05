@@ -221,11 +221,13 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
                         is BleClient.State.Scanning -> "Scanning..."
                         is BleClient.State.Connecting -> "Connecting..."
                         is BleClient.State.Connected -> "Connected"
+                        is BleClient.State.Reconnecting -> "Reconnecting..."
                         is BleClient.State.Error -> state.message
                     },
                     fontSize = 13.sp,
                     color = when (state) {
                         is BleClient.State.Connected -> Color(0xFF4CAF50)
+                        is BleClient.State.Reconnecting -> Color(0xFFFF9800)
                         is BleClient.State.Error -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
@@ -234,7 +236,7 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
             when (state) {
                 is BleClient.State.Connected ->
                     OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
-                is BleClient.State.Scanning, is BleClient.State.Connecting ->
+                is BleClient.State.Scanning, is BleClient.State.Connecting, is BleClient.State.Reconnecting ->
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 else ->
                     Button(onClick = onConnect) { Text("Connect") }
