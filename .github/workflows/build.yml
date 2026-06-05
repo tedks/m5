@@ -36,6 +36,16 @@ jobs:
         with:
           files: companion/app/build/outputs/apk/debug/app-debug.apk
 
+      - name: Update latest release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest (main)
+          prerelease: true
+          make_latest: false
+          files: companion/app/build/outputs/apk/debug/app-debug.apk
+
   build-firmware:
     runs-on: ubuntu-latest
     steps:
@@ -66,4 +76,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          files: firmware/.pio/build/m5stickc-plus/firmware.bin
+
+      - name: Update latest release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest (main)
+          prerelease: true
+          make_latest: false
           files: firmware/.pio/build/m5stickc-plus/firmware.bin
