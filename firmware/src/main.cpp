@@ -148,8 +148,8 @@ static void drawQuotaRowCompact(int idx, int y, int rowH) {
     if (pct > 1.0f) pct = 1.0f;
 
     int textY = y + (rowH - 8) / 2;
-    int barX = 62;
-    int barW = 120;
+    int barX = 70;
+    int barW = 110;
     int barH = 8;
     int barY = y + (rowH - barH) / 2;
     int textX = barX + barW + 4;

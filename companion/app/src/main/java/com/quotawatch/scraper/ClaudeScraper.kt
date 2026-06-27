@@ -50,7 +50,7 @@ class ClaudeScraper(context: Context) {
 
             val sevenDayPct = json.optDouble("sevenDayPct", -1.0)
             if (sevenDayPct >= 0) {
-                results.add(QuotaResult.Success(Quota("Claude 7d", sevenDayPct.toFloat(), 100f, "%")))
+                results.add(QuotaResult.Success(Quota("Claude wk", sevenDayPct.toFloat(), 100f, "%")))
             }
 
             if (results.isEmpty()) {
