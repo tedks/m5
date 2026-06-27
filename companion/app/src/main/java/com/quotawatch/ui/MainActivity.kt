@@ -162,7 +162,7 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
                     codexLoggedIn = vm.fetcher.isCodexLoggedIn(),
                     onUpdateKeys = vm::updateApiKeys,
                     onLoginClaude = { onLogin("https://claude.ai/settings/usage") },
-                    onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/analytics#usage") }
+                    onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/usage") }
                 )
             }
 

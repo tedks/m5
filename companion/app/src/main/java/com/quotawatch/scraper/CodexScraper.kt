@@ -10,7 +10,7 @@ class CodexScraper(context: Context) {
 
     companion object {
         const val TAG = "CodexScraper"
-        const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/analytics#usage"
+        const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
     }
 
     private val scraper = UsageScraper(context)

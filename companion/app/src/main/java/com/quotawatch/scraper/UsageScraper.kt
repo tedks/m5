@@ -71,22 +71,26 @@ class UsageScraper(private val context: Context) {
 
             var pendingInject: Runnable? = null
 
+            var currentUrl = url
+
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, finishedUrl: String) {
                     Log.d(TAG, "onPageFinished: $finishedUrl")
+                    currentUrl = finishedUrl
 
-                    // Detect login redirects (session expired)
-                    if (LOGIN_PATTERNS.any { finishedUrl.contains(it, ignoreCase = true) }) {
-                        Log.w(TAG, "Redirected to login — session expired")
-                        if (!result.isCompleted) {
-                            result.complete(ScrapeResult(null, sessionExpired = true))
-                        }
-                        return
-                    }
-
+                    // Cancel any pending inject — reschedule from the latest finished page.
+                    // This ensures redirects don't trigger injection early, and login detection
+                    // runs against the final settled URL rather than an intermediate redirect.
                     pendingInject?.let { handler.removeCallbacks(it) }
 
                     val inject = Runnable {
+                        if (LOGIN_PATTERNS.any { currentUrl.contains(it, ignoreCase = true) }) {
+                            Log.w(TAG, "Settled at login URL — session expired: $currentUrl")
+                            if (!result.isCompleted) {
+                                result.complete(ScrapeResult(null, sessionExpired = true))
+                            }
+                            return@Runnable
+                        }
                         view.evaluateJavascript(js) { jsResult ->
                             Log.d(TAG, "JS result: ${jsResult?.take(200)}")
                             if (!result.isCompleted) {
