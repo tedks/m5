@@ -23,6 +23,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Install debug keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.ANDROID_DEBUG_KEYSTORE }}" | base64 -d > ~/.android/debug.keystore
+
       - name: Build debug APK
         working-directory: companion
         run: ./gradlew assembleDebug
