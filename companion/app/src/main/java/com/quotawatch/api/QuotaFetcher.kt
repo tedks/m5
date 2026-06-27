@@ -26,8 +26,8 @@ class QuotaFetcher(context: Context) {
     suspend fun fetchAll(keys: ApiKeys): QuotaSnapshot {
         val results = mutableListOf<QuotaResult>()
 
-        results.add(claudeScraper.fetchUsage())
-        results.add(codexScraper.fetchUsage())
+        results.addAll(claudeScraper.fetchUsage())
+        results.addAll(codexScraper.fetchUsage())
 
         if (keys.githubToken != null) {
             results.addAll(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

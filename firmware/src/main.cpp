@@ -23,7 +23,7 @@
 #define C_BLUE    0x04FF
 
 // Quota data
-#define MAX_QUOTAS 5
+#define MAX_QUOTAS 6
 
 struct Quota {
     char name[16];
@@ -114,26 +114,20 @@ static void drawQuotaRow(int idx, int y) {
     int barY = y + 6;
     int textX = barX + barW + 4;
 
-    // Clear row area
     M5.Lcd.fillRect(0, y, SCREEN_W, 28, C_BG);
 
-    // Name
     M5.Lcd.setTextFont(2);
     M5.Lcd.setTextSize(1);
     M5.Lcd.setTextColor(C_TEXT, C_BG);
     M5.Lcd.setCursor(4, y + 4);
     M5.Lcd.print(q->name);
 
-    // Progress bar background
     M5.Lcd.fillRect(barX, barY, barW, barH, C_BAR_BG);
-
-    // Progress bar fill
     int fillW = (int)(pct * barW);
     if (fillW > 0) {
         M5.Lcd.fillRect(barX, barY, fillW, barH, barColor(pct));
     }
 
-    // Value text — fits "9999/3000" comfortably in 81px
     char txt[24];
     if (strcmp(q->unit, "%") == 0) {
         snprintf(txt, sizeof(txt), "%d%%", (int)(pct * 100));
@@ -144,6 +138,46 @@ static void drawQuotaRow(int idx, int y) {
     }
     M5.Lcd.setTextColor(C_TEXT, C_BG);
     M5.Lcd.setCursor(textX, y + 4);
+    M5.Lcd.print(txt);
+}
+
+// Compact variant for 4+ quotas: font 1 (8px), 8px bar, fits in ~18px rows
+static void drawQuotaRowCompact(int idx, int y, int rowH) {
+    Quota* q = &quotas[idx];
+    float pct = (q->limit > 0) ? (q->used / q->limit) : 0.0f;
+    if (pct > 1.0f) pct = 1.0f;
+
+    int textY = y + (rowH - 8) / 2;
+    int barX = 62;
+    int barW = 120;
+    int barH = 8;
+    int barY = y + (rowH - barH) / 2;
+    int textX = barX + barW + 4;
+
+    M5.Lcd.fillRect(0, y, SCREEN_W, rowH, C_BG);
+
+    M5.Lcd.setTextFont(1);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextColor(C_TEXT, C_BG);
+    M5.Lcd.setCursor(4, textY);
+    M5.Lcd.print(q->name);
+
+    M5.Lcd.fillRect(barX, barY, barW, barH, C_BAR_BG);
+    int fillW = (int)(pct * barW);
+    if (fillW > 0) {
+        M5.Lcd.fillRect(barX, barY, fillW, barH, barColor(pct));
+    }
+
+    char txt[24];
+    if (strcmp(q->unit, "%") == 0) {
+        snprintf(txt, sizeof(txt), "%d%%", (int)(pct * 100));
+    } else if (q->limit > 0) {
+        snprintf(txt, sizeof(txt), "%.0f/%.0f", q->used, q->limit);
+    } else {
+        snprintf(txt, sizeof(txt), "%.0f%s", q->used, q->unit);
+    }
+    M5.Lcd.setTextColor(C_TEXT, C_BG);
+    M5.Lcd.setCursor(textX, textY);
     M5.Lcd.print(txt);
 }
 
@@ -193,8 +227,13 @@ static void drawScreen() {
     } else {
         int rowH = (SCREEN_H - 44) / numQuotas;
         if (rowH > 28) rowH = 28;
+        bool compact = (numQuotas > 3);
         for (int i = 0; i < numQuotas; i++) {
-            drawQuotaRow(i, 24 + i * rowH);
+            if (compact) {
+                drawQuotaRowCompact(i, 24 + i * rowH, rowH);
+            } else {
+                drawQuotaRow(i, 24 + i * rowH);
+            }
         }
     }
 

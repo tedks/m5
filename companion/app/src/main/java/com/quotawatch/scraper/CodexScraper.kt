@@ -17,18 +17,18 @@ class CodexScraper(context: Context) {
 
     fun isLoggedIn(): Boolean = scraper.hasSession("https://chatgpt.com")
 
-    suspend fun fetchUsage(): QuotaResult {
+    suspend fun fetchUsage(): List<QuotaResult> {
         if (!isLoggedIn()) {
-            return QuotaResult.Unavailable("Codex", "Tap 'Log in' next to Codex in Settings")
+            return listOf(QuotaResult.Unavailable("Codex", "Tap 'Log in' next to Codex in Settings"))
         }
 
         return try {
             val result = scraper.scrape(USAGE_URL, JS_EXTRACT)
             if (result.sessionExpired) {
-                return QuotaResult.Unavailable("Codex", "Session expired — tap 'Re-login' in Settings")
+                return listOf(QuotaResult.Unavailable("Codex", "Session expired — tap 'Re-login' in Settings"))
             }
             if (result.data == null) {
-                return QuotaResult.Error("Codex", "Page load timed out")
+                return listOf(QuotaResult.Error("Codex", "Page load timed out"))
             }
 
             val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
@@ -38,21 +38,31 @@ class CodexScraper(context: Context) {
             val json = JSONObject(jsonStr)
 
             if (json.has("error")) {
-                return QuotaResult.Error("Codex", json.getString("error"))
+                return listOf(QuotaResult.Error("Codex", json.getString("error")))
             }
+
+            val results = mutableListOf<QuotaResult>()
 
             // Page shows "X% remaining" — we want "used"
             val fiveHourRemaining = json.optDouble("fiveHourRemaining", -1.0)
             if (fiveHourRemaining >= 0) {
-                val used = (100.0 - fiveHourRemaining).toFloat()
-                return QuotaResult.Success(Quota("Codex", used, 100f, "%"))
+                results.add(QuotaResult.Success(Quota("Codex 5h", (100.0 - fiveHourRemaining).toFloat(), 100f, "%")))
             }
 
-            val text = json.optString("text", "")
-            QuotaResult.Error("Codex", "Could not parse. Text: ${text.take(200)}")
+            val weeklyRemaining = json.optDouble("weeklyRemaining", -1.0)
+            if (weeklyRemaining >= 0) {
+                results.add(QuotaResult.Success(Quota("Codex wk", (100.0 - weeklyRemaining).toFloat(), 100f, "%")))
+            }
+
+            if (results.isEmpty()) {
+                val text = json.optString("text", "")
+                results.add(QuotaResult.Error("Codex", "Could not parse. Text: ${text.take(200)}"))
+            }
+
+            results
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
-            QuotaResult.Error("Codex", e.message ?: "Scrape failed")
+            listOf(QuotaResult.Error("Codex", e.message ?: "Scrape failed"))
         }
     }
 
