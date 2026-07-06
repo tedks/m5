@@ -11,6 +11,9 @@ class ClaudeScraper(context: Context) {
     companion object {
         const val TAG = "ClaudeScraper"
         const val USAGE_URL = "https://claude.ai/settings/usage"
+        // claude.ai/settings/usage is a React SPA that renders quota data
+        // asynchronously; 6s gives it enough time vs the default 4s.
+        const val INJECT_DELAY_MS = 6000L
     }
 
     private val scraper = UsageScraper(context)
@@ -23,7 +26,7 @@ class ClaudeScraper(context: Context) {
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, injectDelayMs = 6000L)
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, injectDelayMs = INJECT_DELAY_MS)
             if (result.sessionExpired) {
                 return listOf(QuotaResult.Unavailable("Claude", "Session expired — tap 'Re-login' in Settings"))
             }

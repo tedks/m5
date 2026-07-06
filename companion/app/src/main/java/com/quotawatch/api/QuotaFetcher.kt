@@ -92,8 +92,7 @@ class QuotaFetcher(context: Context) {
         if (!response.isSuccessful) throw Exception(
             when (response.code) {
                 401 -> "Token invalid or expired — update in Settings"
-                403 -> "Token lacks 'user' scope"
-                else -> "User lookup failed: ${response.code}"
+                else -> try { JSONObject(body).getString("message") } catch (_: Exception) { "HTTP ${response.code}" }
             }
         )
         return JSONObject(body).getString("login")
