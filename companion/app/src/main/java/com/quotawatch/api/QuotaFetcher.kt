@@ -89,7 +89,12 @@ class QuotaFetcher(context: Context) {
             .build()
         val response = client.newCall(request).execute()
         val body = response.body?.string() ?: throw Exception("Empty response")
-        if (!response.isSuccessful) throw Exception("User lookup failed: ${response.code}")
+        if (!response.isSuccessful) throw Exception(
+            when (response.code) {
+                401 -> "Token invalid or expired — update in Settings"
+                else -> try { JSONObject(body).getString("message") } catch (_: Exception) { "HTTP ${response.code}" }
+            }
+        )
         return JSONObject(body).getString("login")
     }
 }

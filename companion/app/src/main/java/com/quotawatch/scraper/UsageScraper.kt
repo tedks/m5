@@ -48,7 +48,7 @@ class UsageScraper(private val context: Context) {
     )
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun scrape(url: String, js: String, retryCount: Int = 0): ScrapeResult =
+    suspend fun scrape(url: String, js: String, injectDelayMs: Long = INJECT_DELAY_MS, retryCount: Int = 0): ScrapeResult =
         withContext(Dispatchers.Main) {
             val result = CompletableDeferred<ScrapeResult>()
             val handler = Handler(Looper.getMainLooper())
@@ -99,7 +99,7 @@ class UsageScraper(private val context: Context) {
                         }
                     }
                     pendingInject = inject
-                    handler.postDelayed(inject, INJECT_DELAY_MS)
+                    handler.postDelayed(inject, injectDelayMs)
                 }
 
                 override fun onReceivedError(
@@ -124,7 +124,7 @@ class UsageScraper(private val context: Context) {
             // Retry on transient failure (not session expiry)
             if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
                 Log.d(TAG, "Retrying $url...")
-                return@withContext scrape(url, js, retryCount + 1)
+                return@withContext scrape(url, js, injectDelayMs, retryCount + 1)
             }
 
             scraped
