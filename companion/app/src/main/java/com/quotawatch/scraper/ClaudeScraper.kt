@@ -23,7 +23,7 @@ class ClaudeScraper(context: Context) {
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT)
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, injectDelayMs = 6000L)
             if (result.sessionExpired) {
                 return listOf(QuotaResult.Unavailable("Claude", "Session expired — tap 'Re-login' in Settings"))
             }
