@@ -73,6 +73,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Covers: user denied in-app, granted BLUETOOTH_CONNECT/SCAN from system Settings, then
+        // returned here without the Activity being recreated — startServiceControlIfPermitted()
+        // is idempotent (guarded by serviceControlStarted), so retrying here is safe.
+        startServiceControlIfPermitted()
+    }
+
     /**
      * Wire the auto-refresh toggle to start/stop [QuotaRefreshService], but only once the BLE
      * runtime permissions are actually granted.
