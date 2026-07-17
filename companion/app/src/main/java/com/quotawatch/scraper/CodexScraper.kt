@@ -6,14 +6,14 @@ import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
 import org.json.JSONObject
 
-class CodexScraper(context: Context) {
+class CodexScraper(contextProvider: () -> Context) {
 
     companion object {
         const val TAG = "CodexScraper"
         const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
     }
 
-    private val scraper = UsageScraper(context)
+    private val scraper = UsageScraper(contextProvider)
 
     fun isLoggedIn(): Boolean = scraper.hasSession("https://chatgpt.com")
 

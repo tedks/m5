@@ -9,7 +9,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class QuotaFetcher(context: Context) {
+class QuotaFetcher(contextProvider: () -> Context) {
 
     companion object {
         const val TAG = "QuotaFetcher"
@@ -20,8 +20,8 @@ class QuotaFetcher(context: Context) {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val claudeScraper = ClaudeScraper(context)
-    private val codexScraper = CodexScraper(context)
+    private val claudeScraper = ClaudeScraper(contextProvider)
+    private val codexScraper = CodexScraper(contextProvider)
 
     suspend fun fetchAll(keys: ApiKeys): QuotaSnapshot {
         val results = mutableListOf<QuotaResult>()

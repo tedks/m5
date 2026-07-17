@@ -6,7 +6,7 @@ import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
 import org.json.JSONObject
 
-class ClaudeScraper(context: Context) {
+class ClaudeScraper(contextProvider: () -> Context) {
 
     companion object {
         const val TAG = "ClaudeScraper"
@@ -16,7 +16,7 @@ class ClaudeScraper(context: Context) {
         const val INJECT_DELAY_MS = 6000L
     }
 
-    private val scraper = UsageScraper(context)
+    private val scraper = UsageScraper(contextProvider)
 
     fun isLoggedIn(): Boolean = scraper.hasSession("https://claude.ai")
 
