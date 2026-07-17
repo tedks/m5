@@ -30,8 +30,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.quotawatch.api.ApiKeys
-import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
+import com.quotawatch.api.serviceDisplayName
 import com.quotawatch.ble.BleClient
 import kotlinx.coroutines.delay
 
@@ -194,9 +194,9 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
                 LastUpdatedText(snapshot.timestamp)
             }
 
-            snapshot.quotas.forEach { QuotaCard(it) }
-            snapshot.errors.forEach { ErrorCard(it.service, it.message) }
-            snapshot.unavailable.forEach { UnavailableCard(it.service, it.reason) }
+            snapshot.successes.forEach { QuotaCard(it, snapshot.timestamp) }
+            snapshot.errors.forEach { ErrorCard(serviceDisplayName(it.service), it.message) }
+            snapshot.unavailable.forEach { UnavailableCard(serviceDisplayName(it.service), it.reason) }
 
             if (snapshot.results.isEmpty()) {
                 Text(
@@ -315,8 +315,15 @@ fun SettingsCard(
     }
 }
 
+// A carried-over (last-known-good) result is only flagged as stale once it's older than this by
+// more than a normal fetch pass would explain — a full Claude+Codex+GitHub refresh can itself
+// take on the order of tens of seconds, and we don't want that alone to read as "stale".
+private const val STALE_DISPLAY_THRESHOLD_MS = 120_000L
+
 @Composable
-fun QuotaCard(quota: Quota) {
+fun QuotaCard(result: QuotaResult.Success, snapshotTimestamp: Long) {
+    val quota = result.quota
+    val staleMs = snapshotTimestamp - result.fetchedAt
     val barColor = when {
         quota.limit <= 0 -> Color(0xFF4CAF50)
         quota.percent < 0.5f -> Color(0xFF4CAF50)
@@ -337,6 +344,15 @@ fun QuotaCard(quota: Quota) {
                     },
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (staleMs > STALE_DISPLAY_THRESHOLD_MS) {
+                Text(
+                    "stale · ${staleMs / 60_000}m",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
 
