@@ -18,12 +18,19 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
+import org.json.JSONTokener
 
 class UsageScraper(private val contextProvider: () -> Context) {
 
     companion object {
         const val TAG = "UsageScraper"
-        const val INJECT_DELAY_MS = 4000L
+        // Delay before the first extraction attempt after the page settles (debounced past
+        // redirects). Deliberately short — INITIAL_POLL_DELAY_MS + a few POLL_INTERVAL_MS ticks
+        // covers the old fixed 4s/6s waits on a fast render, and unlike a fixed delay we keep
+        // polling instead of extracting exactly once.
+        const val INITIAL_POLL_DELAY_MS = 1000L
+        const val POLL_INTERVAL_MS = 500L
         const val TIMEOUT_MS = 45000L
         const val MAX_RETRIES = 1
         const val CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
@@ -31,6 +38,29 @@ class UsageScraper(private val contextProvider: () -> Context) {
 
         // Login page patterns — if we land here, the session expired
         private val LOGIN_PATTERNS = listOf("/login", "/auth", "/signin", "/oauth")
+
+        // evaluateJavascript's callback hands back a JSON-encoded representation of the JS
+        // expression's value: for our JS (which always returns a string via JSON.stringify),
+        // that's a quoted, escaped JSON string literal — e.g. `"{\"foo\":1}"` — or the bare
+        // literal `null` if the JS threw before returning. JSONTokener does the actual JSON
+        // string-unescaping (quotes, backslashes, \n, \uXXXX, ...) instead of the hand-rolled,
+        // order-sensitive chained .replace() calls this used to do, which mishandled inputs
+        // containing literal backslash-n sequences and never handled \u escapes at all.
+        //
+        // Deliberately pure (no logging) so it's cheaply unit-testable off-device; callers log
+        // the decoded (or null) result themselves.
+        fun decodeJsResult(raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            return try {
+                when (val value = JSONTokener(raw).nextValue()) {
+                    is String -> value
+                    JSONObject.NULL -> null
+                    else -> null
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 
     // Resolve the context freshly per scrape: the provider hands back the live Activity when
@@ -52,7 +82,12 @@ class UsageScraper(private val contextProvider: () -> Context) {
     )
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun scrape(url: String, js: String, injectDelayMs: Long = INJECT_DELAY_MS, retryCount: Int = 0): ScrapeResult =
+    suspend fun scrape(
+        url: String,
+        js: String,
+        isSettled: (String) -> Boolean = { true },
+        retryCount: Int = 0
+    ): ScrapeResult =
         withContext(Dispatchers.Main) {
             val result = CompletableDeferred<ScrapeResult>()
             val handler = Handler(Looper.getMainLooper())
@@ -80,21 +115,63 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             }
 
-            var pendingInject: Runnable? = null
-
+            var pendingPoll: Runnable? = null
             var currentUrl = url
+            var lastDecoded: String? = null
+            // Flipped right before teardown (removeCallbacks/destroy). A Handler runnable can't
+            // be un-posted once it starts running, and an in-flight evaluateJavascript callback
+            // can't be cancelled at all — this flag stops either of them from touching the
+            // WebView or scheduling a new poll after we've torn down.
+            var isTornDown = false
+
+            // Runs isSettled defensively: a predicate that throws on a half-rendered/garbage
+            // payload must not kill the scrape (the scrapers also guard their own predicates,
+            // this is a second line of defense).
+            fun safeIsSettled(decoded: String): Boolean =
+                try {
+                    isSettled(decoded)
+                } catch (e: Exception) {
+                    Log.w(TAG, "isSettled predicate threw", e)
+                    false
+                }
+
+            // Poll the page every POLL_INTERVAL_MS. "Settled" = the decoded result is valid per
+            // isSettled AND identical to the previous poll's result. That combination naturally
+            // waits out progressive SPA rendering (one panel renders before another) without a
+            // per-site fixed delay: an OR-style isSettled keeps polling until every field that
+            // will show up on THIS poll's most-rendered pass has stopped changing.
+            fun pollOnce(view: WebView) {
+                if (isTornDown || result.isCompleted) return
+                view.evaluateJavascript(js) { jsResult ->
+                    if (isTornDown || result.isCompleted) return@evaluateJavascript
+                    val decoded = decodeJsResult(jsResult)
+                    Log.d(TAG, "Poll result: ${decoded?.take(200)}")
+                    val settled = decoded != null && decoded == lastDecoded && safeIsSettled(decoded)
+                    if (settled) {
+                        result.complete(ScrapeResult(decoded))
+                    } else {
+                        lastDecoded = decoded
+                        val next = Runnable { pollOnce(view) }
+                        pendingPoll = next
+                        handler.postDelayed(next, POLL_INTERVAL_MS)
+                    }
+                }
+            }
 
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, finishedUrl: String) {
                     Log.d(TAG, "onPageFinished: $finishedUrl")
                     currentUrl = finishedUrl
 
-                    // Cancel any pending inject — reschedule from the latest finished page.
-                    // This ensures redirects don't trigger injection early, and login detection
-                    // runs against the final settled URL rather than an intermediate redirect.
-                    pendingInject?.let { handler.removeCallbacks(it) }
+                    // Cancel any pending poll — reschedule from the latest finished page. This
+                    // ensures redirects don't trigger extraction early, and login detection runs
+                    // against the final settled URL rather than an intermediate redirect. Also
+                    // reset lastDecoded: a redirect means we're on a different page now, so the
+                    // previous poll's result is no longer a meaningful "did it change" baseline.
+                    pendingPoll?.let { handler.removeCallbacks(it) }
+                    lastDecoded = null
 
-                    val inject = Runnable {
+                    val start = Runnable {
                         if (LOGIN_PATTERNS.any { currentUrl.contains(it, ignoreCase = true) }) {
                             Log.w(TAG, "Settled at login URL — session expired: $currentUrl")
                             if (!result.isCompleted) {
@@ -102,15 +179,10 @@ class UsageScraper(private val contextProvider: () -> Context) {
                             }
                             return@Runnable
                         }
-                        view.evaluateJavascript(js) { jsResult ->
-                            Log.d(TAG, "JS result: ${jsResult?.take(200)}")
-                            if (!result.isCompleted) {
-                                result.complete(ScrapeResult(jsResult))
-                            }
-                        }
+                        pollOnce(view)
                     }
-                    pendingInject = inject
-                    handler.postDelayed(inject, injectDelayMs)
+                    pendingPoll = start
+                    handler.postDelayed(start, INITIAL_POLL_DELAY_MS)
                 }
 
                 override fun onReceivedError(
@@ -125,10 +197,14 @@ class UsageScraper(private val contextProvider: () -> Context) {
 
             webView.loadUrl(url)
 
+            // On timeout, hand back the last decoded result we saw even though it never
+            // stabilized — partial data (which the scrapers can still partially parse, or at
+            // worst report alongside the raw page text) beats reporting nothing at all.
             val scraped = withTimeoutOrNull(TIMEOUT_MS) { result.await() }
-                ?: ScrapeResult(null)
+                ?: ScrapeResult(lastDecoded)
 
-            pendingInject?.let { handler.removeCallbacks(it) }
+            isTornDown = true
+            pendingPoll?.let { handler.removeCallbacks(it) }
             webView.stopLoading()
             webView.destroy()
 
@@ -142,7 +218,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
             // Retry on transient failure (not session expiry)
             if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
                 Log.d(TAG, "Retrying $url...")
-                return@withContext scrape(url, js, injectDelayMs, retryCount + 1)
+                return@withContext scrape(url, js, isSettled, retryCount + 1)
             }
 
             scraped

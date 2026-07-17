@@ -11,9 +11,18 @@ class ClaudeScraper(contextProvider: () -> Context) {
     companion object {
         const val TAG = "ClaudeScraper"
         const val USAGE_URL = "https://claude.ai/settings/usage"
-        // claude.ai/settings/usage is a React SPA that renders quota data
-        // asynchronously; 6s gives it enough time vs the default 4s.
-        const val INJECT_DELAY_MS = 6000L
+
+        // claude.ai/settings/usage is a React SPA whose 5h and 7d panels can render on separate
+        // ticks. Only require ONE of them so a page that only ever populates one panel (or is
+        // still working on the other when we give up at the timeout) doesn't poll forever — the
+        // scraper's valid-and-stable check still waits out the other panel catching up as long
+        // as there's time left.
+        private fun isSettled(raw: String): Boolean = try {
+            val json = JSONObject(raw)
+            json.optDouble("fiveHourPct", -1.0) >= 0 || json.optDouble("sevenDayPct", -1.0) >= 0
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private val scraper = UsageScraper(contextProvider)
@@ -26,7 +35,7 @@ class ClaudeScraper(contextProvider: () -> Context) {
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, injectDelayMs = INJECT_DELAY_MS)
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, isSettled = ::isSettled)
             if (result.sessionExpired) {
                 return listOf(QuotaResult.Unavailable("claude", "Session expired — tap 'Re-login' in Settings"))
             }
@@ -34,11 +43,9 @@ class ClaudeScraper(contextProvider: () -> Context) {
                 return listOf(QuotaResult.Error("claude", "Page load timed out"))
             }
 
-            val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
-                .replace("\\n", "\n").replace("\\\\", "\\")
-            Log.d(TAG, "Parsed: ${jsonStr.take(200)}")
+            Log.d(TAG, "Parsed: ${result.data.take(200)}")
 
-            val json = JSONObject(jsonStr)
+            val json = JSONObject(result.data)
 
             if (json.has("error")) {
                 return listOf(QuotaResult.Error("claude", json.getString("error")))
