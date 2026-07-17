@@ -11,6 +11,21 @@ class CodexScraper(contextProvider: () -> Context) {
     companion object {
         const val TAG = "CodexScraper"
         const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
+
+        // The 5-hour and weekly panels on this page can render on separate ticks (this is the
+        // root cause of m5-hf9 — the weekly block finishes rendering before the 5-hour block, so
+        // a single fixed-delay extraction sometimes catches the weekly number with the 5-hour
+        // one still at its unrendered default). Only require ONE of them so a page that only
+        // ever populates one panel doesn't poll forever — the scraper's valid-and-stable check
+        // still waits for the other panel to catch up as long as there's time left, because the
+        // decoded JSON keeps changing (the other field flips from -1 to a real value) until both
+        // panels are actually done.
+        private fun isSettled(raw: String): Boolean = try {
+            val json = JSONObject(raw)
+            json.optDouble("fiveHourRemaining", -1.0) >= 0 || json.optDouble("weeklyRemaining", -1.0) >= 0
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private val scraper = UsageScraper(contextProvider)
@@ -23,7 +38,7 @@ class CodexScraper(contextProvider: () -> Context) {
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT)
+            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, isSettled = ::isSettled)
             if (result.sessionExpired) {
                 return listOf(QuotaResult.Unavailable("codex", "Session expired — tap 'Re-login' in Settings"))
             }
