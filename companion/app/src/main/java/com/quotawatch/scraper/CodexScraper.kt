@@ -12,19 +12,42 @@ class CodexScraper(contextProvider: () -> Context) {
         const val TAG = "CodexScraper"
         const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
 
-        // The 5-hour and weekly panels on this page can render on separate ticks (this is the
-        // root cause of m5-hf9 — the weekly block finishes rendering before the 5-hour block, so
-        // a single fixed-delay extraction sometimes catches the weekly number with the 5-hour
-        // one still at its unrendered default). Only require ONE of them so a page that only
-        // ever populates one panel doesn't poll forever — the scraper's valid-and-stable check
-        // still waits for the other panel to catch up as long as there's time left, because the
-        // decoded JSON keeps changing (the other field flips from -1 to a real value) until both
-        // panels are actually done.
+        // This account's chatgpt.com/codex/cloud/settings/usage page (verified live 2026-07-17)
+        // shows a "Weekly usage limit ... N% remaining" block plus Balance / per-model breakdowns —
+        // there is NO "5 hour usage limit" section (bd m5-hf9/m5-iia; the old 5h regex was a
+        // phantom that never matched). We settle as soon as the weekly value is present; the
+        // per-model "100% remaining" rows are deliberately not captured (they're not a plan quota).
         private fun isSettled(raw: String): Boolean = try {
             val json = JSONObject(raw)
-            json.optDouble("fiveHourRemaining", -1.0) >= 0 || json.optDouble("weeklyRemaining", -1.0) >= 0
+            json.optDouble("weeklyRemaining", -1.0) >= 0
         } catch (e: Exception) {
             false
+        }
+
+        /**
+         * Map the extraction JSON to quota results. Pure (no Android deps) so it's unit-testable.
+         * The page reports "N% remaining"; we convert to used (100 - remaining). Only the value
+         * anchored to the "Weekly usage limit" label reaches here; if it's absent we fail honestly
+         * (PR2 retains last-known-good numbers on error).
+         */
+        fun parseUsage(data: String): List<QuotaResult> {
+            val json = JSONObject(data)
+            if (json.has("error")) {
+                return listOf(QuotaResult.Error("codex", json.getString("error")))
+            }
+
+            val results = mutableListOf<QuotaResult>()
+
+            val weeklyRemaining = json.optDouble("weeklyRemaining", -1.0)
+            if (weeklyRemaining in 0.0..100.0) {
+                results.add(QuotaResult.Success("codex", Quota("Codex wk", (100.0 - weeklyRemaining).toFloat(), 100f, "%")))
+            }
+
+            if (results.isEmpty()) {
+                results.add(QuotaResult.Error("codex", "Weekly usage limit not found on page"))
+            }
+
+            return results
         }
     }
 
@@ -46,64 +69,30 @@ class CodexScraper(contextProvider: () -> Context) {
                 return listOf(QuotaResult.Error("codex", "Page load timed out"))
             }
 
-            Log.d(TAG, "Parsed: ${result.data.take(300)}")
-
-            val json = JSONObject(result.data)
-
-            if (json.has("error")) {
-                return listOf(QuotaResult.Error("codex", json.getString("error")))
-            }
-
-            val results = mutableListOf<QuotaResult>()
-
-            // Page shows "X% remaining" — we want "used"
-            val fiveHourRemaining = json.optDouble("fiveHourRemaining", -1.0)
-            if (fiveHourRemaining >= 0) {
-                results.add(QuotaResult.Success("codex", Quota("Codex 5h", (100.0 - fiveHourRemaining).toFloat(), 100f, "%")))
-            }
-
-            val weeklyRemaining = json.optDouble("weeklyRemaining", -1.0)
-            if (weeklyRemaining >= 0) {
-                results.add(QuotaResult.Success("codex", Quota("Codex wk", (100.0 - weeklyRemaining).toFloat(), 100f, "%")))
-            }
-
-            if (results.isEmpty()) {
-                val text = json.optString("text", "")
-                results.add(QuotaResult.Error("codex", "Could not parse. Text: ${text.take(200)}"))
-            }
-
-            results
+            Log.d(TAG, "Parsed: ${result.data.take(200)}")
+            parseUsage(result.data)
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
             listOf(QuotaResult.Error("codex", e.message ?: "Scrape failed"))
         }
     }
 
-    // The Codex analytics page shows:
-    //   "5 hour usage limit\n\n100%\nremaining\n\nWeekly usage limit\n\n94%\nremaining"
-    // Parse these "remaining" percentages.
+    // The Codex usage page shows "Weekly usage limit\n\nN%\nremaining" (verified live 2026-07-17).
+    // Parse only that labeled percentage — anchored to "weekly usage limit" so the per-model
+    // "100% remaining" rows below it can't be mistaken for the plan's weekly quota.
     private val JS_EXTRACT = """
         (function() {
             try {
                 var text = document.body.innerText || '';
-                var fiveHourRemaining = -1;
                 var weeklyRemaining = -1;
 
-                // Parse "5 hour usage limit\n\nX%\nremaining"
-                var fiveMatch = text.match(/5\s*hour\s*usage\s*limit\s*[\n\s]*(\d+(?:\.\d+)?)\s*%\s*[\n\s]*remaining/i);
-                if (fiveMatch) {
-                    fiveHourRemaining = parseFloat(fiveMatch[1]);
-                }
-
-                var weekMatch = text.match(/weekly\s*usage\s*limit\s*[\n\s]*(\d+(?:\.\d+)?)\s*%\s*[\n\s]*remaining/i);
+                var weekMatch = text.match(/weekly\s*usage\s*limit[\s\S]{0,40}?(\d+(?:\.\d+)?)\s*%[\s\S]{0,20}?remaining/i);
                 if (weekMatch) {
                     weeklyRemaining = parseFloat(weekMatch[1]);
                 }
 
                 return JSON.stringify({
-                    fiveHourRemaining: fiveHourRemaining,
-                    weeklyRemaining: weeklyRemaining,
-                    text: text.substring(0, 1000)
+                    weeklyRemaining: weeklyRemaining
                 });
             } catch(e) {
                 return JSON.stringify({error: e.toString()});
