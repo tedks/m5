@@ -23,7 +23,19 @@
 #define C_BLUE    0x04FF
 
 // Quota data
-#define MAX_QUOTAS 6
+// Cap raised from 6 to 12 so a second page of per-model (Fable/Spark) rows
+// fits. Memory: 12 * sizeof(Quota) (32B) = 384B static — trivial on the
+// ESP32-PICO-D4's 520KB SRAM. parseQuotaData copies at most sizeof(buf)-1 =
+// 511 bytes and NUL-terminates; 12 lines of "Name:used:limit:unit" (~40B
+// worst case) ≈ 480B, so real payloads fit whole. A single BLE write can
+// carry up to 514B (max ATT MTU 517 − 3B overhead); one that large is
+// truncated at 511, clipping only the tail of the last line, which then
+// fails sscanf and is skipped — no corruption of earlier rows.
+#define MAX_QUOTAS 12
+
+// Quotas render in fixed-size pages; each page lays out independently with the
+// existing font/bar rules (compact layout kicks in above 3 rows on a page).
+#define PAGE_SIZE  6
 
 struct Quota {
     char name[16];
@@ -34,36 +46,64 @@ struct Quota {
 
 static Quota quotas[MAX_QUOTAS];
 static int numQuotas = 0;
+static int currentPage = 0;
 static bool bleConnected = false;
 static bool needsRedraw = true;
 static unsigned long lastUpdateTime = 0;
 static unsigned long lastFooterRedraw = 0;
 static bool screenOn = true;
+static int brightness = 15;  // last-set brightness; restored on wake
+
+// Pages needed for the current quota count. Always >= 1 so callers can safely
+// take (page % totalPages()) without a divide-by-zero when numQuotas == 0.
+static int totalPages() {
+    if (numQuotas <= 0) return 1;
+    return (numQuotas + PAGE_SIZE - 1) / PAGE_SIZE;
+}
 
 static BLEServer* pServer = nullptr;
 
 // --- Parsing ---
 // Protocol: newline-separated lines of "Name:used:limit:unit"
 // Example: "Claude:17:100:%\nCodex:42:100:%\nActions:465:3000:min"
-
+// An empty payload is valid and means "zero quotas now".
+//
+// onWrite runs in the BLE host's FreeRTOS task, separate from the UI loop, and
+// we deliberately take no lock here (a general lock-free scheme is a filed
+// follow-up). To keep the torn-read window minimal we parse into a private
+// scratch, then publish quotas[]/currentPage/numQuotas together at the end with
+// numQuotas written *last* as the commit — so a redraw that observes the new
+// count also sees the matching rows and page. drawScreen() additionally guards
+// the shrink transient so it can never divide by zero.
 static void parseQuotaData(const char* data, size_t len) {
     char buf[512];
     size_t n = (len < sizeof(buf) - 1) ? len : sizeof(buf) - 1;
     memcpy(buf, data, n);
     buf[n] = '\0';
 
-    numQuotas = 0;
+    static Quota scratch[MAX_QUOTAS];  // BLE-task-private; never read by the UI task
+    int count = 0;
     char* saveptr = nullptr;
     char* line = strtok_r(buf, "\n", &saveptr);
 
-    while (line && numQuotas < MAX_QUOTAS) {
-        Quota* q = &quotas[numQuotas];
+    while (line && count < MAX_QUOTAS) {
+        Quota* q = &scratch[count];
         if (sscanf(line, "%15[^:]:%f:%f:%7s",
                    q->name, &q->used, &q->limit, q->unit) == 4) {
-            numQuotas++;
+            count++;
         }
         line = strtok_r(nullptr, "\n", &saveptr);
     }
+
+    // Keep the current page across refreshes; fall back to page 1 only if it no
+    // longer exists (quota count shrank). Computed here, off the live count.
+    int pages = (count <= 0) ? 1 : (count + PAGE_SIZE - 1) / PAGE_SIZE;
+    int page = (currentPage >= pages) ? 0 : currentPage;
+
+    // Publish. Rows first, then page, then numQuotas last as the commit.
+    memcpy(quotas, scratch, sizeof(Quota) * count);
+    currentPage = page;
+    numQuotas = count;
 }
 
 // --- Display helpers ---
@@ -194,6 +234,17 @@ static void drawFooter() {
     M5.Lcd.setCursor(6, y + 2);
     M5.Lcd.print(batStr);
 
+    // Page indicator (centered) — only shown when there's more than one page.
+    int pages = totalPages();
+    if (pages > 1) {
+        char pageStr[12];
+        snprintf(pageStr, sizeof(pageStr), "%d/%d", currentPage + 1, pages);
+        int w = M5.Lcd.textWidth(pageStr);
+        M5.Lcd.setTextColor(C_TEXT, C_HEADER);
+        M5.Lcd.setCursor((SCREEN_W - w) / 2, y + 2);
+        M5.Lcd.print(pageStr);
+    }
+
     // Last update time
     M5.Lcd.setCursor(SCREEN_W - 90, y + 2);
     if (lastUpdateTime > 0) {
@@ -225,14 +276,25 @@ static void drawScreen() {
         M5.Lcd.setCursor(30, 70);
         M5.Lcd.print("Connect via BLE");
     } else {
-        int rowH = (SCREEN_H - 44) / numQuotas;
-        if (rowH > 28) rowH = 28;
-        bool compact = (numQuotas > 3);
-        for (int i = 0; i < numQuotas; i++) {
-            if (compact) {
-                drawQuotaRowCompact(i, 24 + i * rowH, rowH);
-            } else {
-                drawQuotaRow(i, 24 + i * rowH);
+        int startIdx = currentPage * PAGE_SIZE;
+        int count = numQuotas - startIdx;
+        if (count > PAGE_SIZE) count = PAGE_SIZE;
+
+        // Defensive: a concurrent BLE publish (separate task, no lock) can
+        // briefly leave currentPage pointing past a just-shrunk numQuotas.
+        // Skip rows this frame rather than divide by zero on rowH below;
+        // onWrite's needsRedraw repaints once the publish settles.
+        if (count > 0) {
+            // Lay out this page based on the number of rows it holds, not the total.
+            int rowH = (SCREEN_H - 44) / count;
+            if (rowH > 28) rowH = 28;
+            bool compact = (count > 3);
+            for (int i = 0; i < count; i++) {
+                if (compact) {
+                    drawQuotaRowCompact(startIdx + i, 24 + i * rowH, rowH);
+                } else {
+                    drawQuotaRow(startIdx + i, 24 + i * rowH);
+                }
             }
         }
     }
@@ -257,11 +319,12 @@ class ServerCallbacks : public BLEServerCallbacks {
 class QuotaWriteCallback : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) override {
         std::string val = pChar->getValue();
-        if (!val.empty()) {
-            parseQuotaData(val.c_str(), val.length());
-            lastUpdateTime = millis();
-            needsRedraw = true;
-        }
+        // Process every write, including empty ones: an empty payload means the
+        // latest refresh has zero quotas and must clear the stale display (the
+        // numQuotas==0 path renders the waiting screen) rather than be ignored.
+        parseQuotaData(val.c_str(), val.length());
+        lastUpdateTime = millis();
+        needsRedraw = true;
     }
 };
 
@@ -304,24 +367,40 @@ void setup() {
 void loop() {
     M5.update();
 
-    // Button A (front): short press = wake/toggle screen, long press = force redraw
-    if (M5.BtnA.wasReleasefor(600)) {
-        // Long press: force redraw
+    // Button A (front). When asleep, wake immediately on press so a long hold in
+    // the dark lights up at once instead of staying black until release; that
+    // waking press is then consumed so its release neither pages nor toggles.
+    // When awake, action happens on release: short press = next page, long press
+    // (>=800ms) = sleep. The 800ms threshold is comfortably above an intentional
+    // tap yet short enough to feel deliberate as a "hold to sleep" gesture.
+    static bool consumeRelease = false;  // swallow the release of a wake press
+    if (M5.BtnA.wasPressed() && !screenOn) {
+        screenOn = true;
+        M5.Axp.ScreenBreath(brightness);
         needsRedraw = true;
-    } else if (M5.BtnA.wasPressed()) {
-        // Short press: toggle screen
-        screenOn = !screenOn;
-        if (screenOn) {
-            M5.Axp.ScreenBreath(15);  // max brightness
-            needsRedraw = true;
+        consumeRelease = true;
+    }
+
+    if (M5.BtnA.wasReleasefor(800)) {
+        if (consumeRelease) {
+            consumeRelease = false;  // wake hold released; nothing further
         } else {
+            // Long press while awake: sleep.
+            screenOn = false;
             M5.Axp.ScreenBreath(0);
+        }
+    } else if (M5.BtnA.wasReleased()) {
+        if (consumeRelease) {
+            consumeRelease = false;  // wake tap released; nothing further
+        } else {
+            // Short press while awake: next page, wrapping around.
+            currentPage = (currentPage + 1) % totalPages();
+            needsRedraw = true;
         }
     }
 
     // Button B (side): cycle brightness
     if (M5.BtnB.wasPressed()) {
-        static int brightness = 15;
         brightness = (brightness == 15) ? 9 : 15;
         M5.Axp.ScreenBreath(brightness);
         screenOn = true;
