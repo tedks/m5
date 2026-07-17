@@ -31,11 +31,9 @@ class CodexScraper(contextProvider: () -> Context) {
                 return listOf(QuotaResult.Error("codex", "Page load timed out"))
             }
 
-            val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
-                .replace("\\n", "\n").replace("\\\\", "\\")
-            Log.d(TAG, "Parsed: ${jsonStr.take(300)}")
+            Log.d(TAG, "Parsed: ${result.data.take(300)}")
 
-            val json = JSONObject(jsonStr)
+            val json = JSONObject(result.data)
 
             if (json.has("error")) {
                 return listOf(QuotaResult.Error("codex", json.getString("error")))

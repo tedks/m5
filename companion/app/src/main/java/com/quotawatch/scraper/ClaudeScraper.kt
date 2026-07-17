@@ -34,11 +34,9 @@ class ClaudeScraper(contextProvider: () -> Context) {
                 return listOf(QuotaResult.Error("claude", "Page load timed out"))
             }
 
-            val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
-                .replace("\\n", "\n").replace("\\\\", "\\")
-            Log.d(TAG, "Parsed: ${jsonStr.take(200)}")
+            Log.d(TAG, "Parsed: ${result.data.take(200)}")
 
-            val json = JSONObject(jsonStr)
+            val json = JSONObject(result.data)
 
             if (json.has("error")) {
                 return listOf(QuotaResult.Error("claude", json.getString("error")))

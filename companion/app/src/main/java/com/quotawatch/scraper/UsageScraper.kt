@@ -18,6 +18,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
+import org.json.JSONTokener
 
 class UsageScraper(private val contextProvider: () -> Context) {
 
@@ -31,6 +33,29 @@ class UsageScraper(private val contextProvider: () -> Context) {
 
         // Login page patterns — if we land here, the session expired
         private val LOGIN_PATTERNS = listOf("/login", "/auth", "/signin", "/oauth")
+
+        // evaluateJavascript's callback hands back a JSON-encoded representation of the JS
+        // expression's value: for our JS (which always returns a string via JSON.stringify),
+        // that's a quoted, escaped JSON string literal — e.g. `"{\"foo\":1}"` — or the bare
+        // literal `null` if the JS threw before returning. JSONTokener does the actual JSON
+        // string-unescaping (quotes, backslashes, \n, \uXXXX, ...) instead of the hand-rolled,
+        // order-sensitive chained .replace() calls this used to do, which mishandled inputs
+        // containing literal backslash-n sequences and never handled \u escapes at all.
+        //
+        // Deliberately pure (no logging) so it's cheaply unit-testable off-device; callers log
+        // the decoded (or null) result themselves.
+        fun decodeJsResult(raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            return try {
+                when (val value = JSONTokener(raw).nextValue()) {
+                    is String -> value
+                    JSONObject.NULL -> null
+                    else -> null
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 
     // Resolve the context freshly per scrape: the provider hands back the live Activity when
@@ -103,9 +128,10 @@ class UsageScraper(private val contextProvider: () -> Context) {
                             return@Runnable
                         }
                         view.evaluateJavascript(js) { jsResult ->
-                            Log.d(TAG, "JS result: ${jsResult?.take(200)}")
+                            val decoded = decodeJsResult(jsResult)
+                            Log.d(TAG, "JS result: ${decoded?.take(200)}")
                             if (!result.isCompleted) {
-                                result.complete(ScrapeResult(jsResult))
+                                result.complete(ScrapeResult(decoded))
                             }
                         }
                     }
