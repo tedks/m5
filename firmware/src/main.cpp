@@ -217,6 +217,17 @@ static void drawFooter() {
     M5.Lcd.setCursor(6, y + 2);
     M5.Lcd.print(batStr);
 
+    // Page indicator (centered) — only shown when there's more than one page.
+    int pages = totalPages();
+    if (pages > 1) {
+        char pageStr[12];
+        snprintf(pageStr, sizeof(pageStr), "%d/%d", currentPage + 1, pages);
+        int w = M5.Lcd.textWidth(pageStr);
+        M5.Lcd.setTextColor(C_TEXT, C_HEADER);
+        M5.Lcd.setCursor((SCREEN_W - w) / 2, y + 2);
+        M5.Lcd.print(pageStr);
+    }
+
     // Last update time
     M5.Lcd.setCursor(SCREEN_W - 90, y + 2);
     if (lastUpdateTime > 0) {
