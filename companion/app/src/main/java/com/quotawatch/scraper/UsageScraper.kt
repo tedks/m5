@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-class UsageScraper(private val context: Context) {
+class UsageScraper(private val contextProvider: () -> Context) {
 
     companion object {
         const val TAG = "UsageScraper"
@@ -33,13 +33,17 @@ class UsageScraper(private val context: Context) {
         private val LOGIN_PATTERNS = listOf("/login", "/auth", "/signin", "/oauth")
     }
 
+    // Resolve the context freshly per scrape: the provider hands back the live Activity when
+    // one exists (WebViews empirically fail to render under an Application context on some
+    // devices, see 046ec8c), unwrapping to the underlying Activity as a last line of defense.
     private fun getActivityContext(): Context {
-        var ctx = context
+        val resolved = contextProvider()
+        var ctx: Context = resolved
         while (ctx is ContextWrapper) {
             if (ctx is Activity) return ctx
             ctx = ctx.baseContext
         }
-        return context
+        return resolved
     }
 
     data class ScrapeResult(
