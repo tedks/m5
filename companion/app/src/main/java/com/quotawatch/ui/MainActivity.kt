@@ -28,12 +28,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.quotawatch.api.ApiKeys
 import com.quotawatch.api.QuotaResult
 import com.quotawatch.api.serviceDisplayName
 import com.quotawatch.ble.BleClient
+import com.quotawatch.service.QuotaRefreshService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val vm: QuotaViewModel by viewModels()
@@ -47,6 +52,19 @@ class MainActivity : ComponentActivity() {
         // Give the scraper an Activity context so WebViews can render
         vm.setActivityContext(this)
         requestBlePermissions()
+
+        // Start/stop the background-refresh foreground service to match the auto-refresh toggle.
+        // Collected only while the Activity is STARTED, so startForegroundService always runs from
+        // a foreground context (Android 12+ blocks background FGS starts).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                vm.autoRefreshEnabled.collect { enabled ->
+                    if (enabled) QuotaRefreshService.start(this@MainActivity)
+                    else QuotaRefreshService.stop(this@MainActivity)
+                }
+            }
+        }
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 QuotaWatchApp(vm)
@@ -59,6 +77,10 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms.add(Manifest.permission.BLUETOOTH_SCAN)
             perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        // The foreground service posts an ongoing notification; on API 33+ that needs runtime grant.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         val needed = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
