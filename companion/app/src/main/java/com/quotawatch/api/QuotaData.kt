@@ -53,23 +53,43 @@ data class QuotaSnapshot(
 }
 
 /**
- * Merge a freshly-fetched snapshot (`this`) with the [previous] one so a transient per-service
- * failure doesn't blank out that service's numbers on the phone UI / BLE payload.
+ * Merge a freshly-fetched snapshot (`this`) with the [previous] one so a transient per-quota
+ * failure doesn't blank out that quota's numbers on the phone UI / BLE payload.
  *
- * Rules, per service id:
- *  - If this snapshot has at least one [QuotaResult.Success] for a service, its results for that
- *    service win outright — nothing from [previous] is carried over for it.
- *  - Otherwise (the service only errored/is unavailable this round, or is entirely absent from
- *    this snapshot — e.g. a removed GitHub token), retain [previous]'s Success results for that
- *    service as long as they're not older than [MAX_STALE_MS] relative to [now]. Any fresh
- *    Error/Unavailable this snapshot has for that service is kept as-is alongside the retained
- *    Success, so the failure stays visible even while last-known-good numbers are shown.
+ * Retention is keyed on **quota name**, not service id, because one service can report several
+ * distinct quotas under the same id — ClaudeScraper emits both "Claude 5h" and "Claude wk" under
+ * `"claude"`. A partial settle (only one of the two came back fresh this round) must retain the
+ * OTHER previous quota, not drop it because "claude" produced *a* success.
+ *
+ * Rules, per previous [QuotaResult.Success]:
+ *  - If a fresh Success carries the same `quota.name`, the fresh value wins — nothing is retained.
+ *  - Otherwise the previous Success is retained ONLY if the fresh snapshot shows its service still
+ *    *actively reporting*: at least one [QuotaResult.Success] or [QuotaResult.Error] for that
+ *    service. A service that only errored this round is transiently broken, so carrying its
+ *    last-known-good numbers is honest.
+ *  - If the service's fresh results are only [QuotaResult.Unavailable] (session expired / not
+ *    logged in / no GitHub token), or the service is entirely absent from the fresh snapshot, the
+ *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
+ *    payload must never present deliberately-unavailable data as if it were live — showing
+ *    hour-old numbers under a "logged out" service reads as current and misleads.
+ *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
+ *    to [now] is dropped regardless.
+ *
+ * Any fresh Error/Unavailable is kept as-is alongside a retained Success, so the failure stays
+ * visible even while last-known-good numbers are shown.
  */
 fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot {
-    val freshSuccessServices = successes.map { it.service }.toSet()
+    val freshSuccessNames = successes.map { it.quota.name }.toSet()
+    // Services still "actively reporting" this round: they produced a Success or an Error.
+    // A service seen only as Unavailable (or not seen at all) is deliberately down — no retention.
+    val activeServices = results
+        .filter { it is QuotaResult.Success || it is QuotaResult.Error }
+        .map { it.service }
+        .toSet()
 
     val retainedStale = previous.successes
-        .filter { it.service !in freshSuccessServices }
+        .filter { it.quota.name !in freshSuccessNames }
+        .filter { it.service in activeServices }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
     return copy(results = results + retainedStale)
