@@ -422,7 +422,7 @@ fun LastUpdatedText(timestamp: Long) {
         else -> "${ago / 3600}h ago"
     }
     Text(
-        "Updated $text",
+        "Checked $text",
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth()
