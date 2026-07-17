@@ -71,6 +71,13 @@ class UsageScraper(private val contextProvider: () -> Context) {
 
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                // Keep the renderer at IMPORTANT priority even with nothing visible. This WebView
+                // is 1x1 and off-screen, and background scrapes run with no foreground UI at all;
+                // without this the OS deprioritizes/pauses the renderer, so the SPA never finishes
+                // rendering and the scrape hits the 45s timeout. waivedWhenNotVisible=false keeps
+                // the priority pinned regardless of visibility.
+                setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             }
 
             var pendingInject: Runnable? = null
