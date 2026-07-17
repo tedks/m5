@@ -69,7 +69,17 @@ class QuotaRefreshService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // startForeground within the 5s ANR window before doing anything else.
-        startForegroundCompat(NOTIFICATION_ID, buildNotification(repository.quotas.value))
+        try {
+            startForegroundCompat(NOTIFICATION_ID, buildNotification(repository.quotas.value))
+        } catch (e: SecurityException) {
+            // A connectedDevice FGS started without holding a qualifying runtime permission
+            // (BLUETOOTH_CONNECT/SCAN) throws on Android 14+/targetSdk 35. The primary fix gates
+            // the start on granted BLE permissions (MainActivity); this is defense in depth so a
+            // start/grant race can't crash the process. Bail out cleanly instead.
+            Log.e(TAG, "startForeground denied — missing BLE permission at start time", e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // onStartCommand can be re-delivered (redeliveries, repeated start calls); only wire up
         // the loop and notification collector once.
@@ -140,7 +150,7 @@ class QuotaRefreshService : Service() {
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setShowWhen(true)
-            .setWhen(if (snapshot.timestamp > 0) snapshot.timestamp else System.currentTimeMillis())
+            .setWhen(snapshot.timestamp)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
