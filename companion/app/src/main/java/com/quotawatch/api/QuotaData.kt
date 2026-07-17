@@ -56,13 +56,16 @@ data class QuotaSnapshot(
  * Merge a freshly-fetched snapshot (`this`) with the [previous] one so a transient per-quota
  * failure doesn't blank out that quota's numbers on the phone UI / BLE payload.
  *
- * Retention is keyed on **quota name**, not service id, because one service can report several
- * distinct quotas under the same id — ClaudeScraper emits both "Claude 5h" and "Claude wk" under
- * `"claude"`. A partial settle (only one of the two came back fresh this round) must retain the
- * OTHER previous quota, not drop it because "claude" produced *a* success.
+ * Retention is keyed on the **(service id, quota name) pair**, not quota name alone. Keying on
+ * name alone would let two different services that happen to emit the same quota label
+ * cross-suppress each other's retention. Service id alone isn't enough either: one service can
+ * report several distinct quotas under the same id — ClaudeScraper emits both "Claude 5h" and
+ * "Claude wk" under `"claude"`. A partial settle (only one of the two came back fresh this round)
+ * must retain the OTHER previous quota, not drop it because "claude" produced *a* success.
  *
  * Rules, per previous [QuotaResult.Success]:
- *  - If a fresh Success carries the same `quota.name`, the fresh value wins — nothing is retained.
+ *  - If a fresh Success carries the same `(service, quota.name)` pair, the fresh value wins —
+ *    nothing is retained.
  *  - Otherwise the previous Success is retained ONLY if the fresh snapshot shows its service still
  *    *actively reporting*: at least one [QuotaResult.Success] or [QuotaResult.Error] for that
  *    service. A service that only errored this round is transiently broken, so carrying its
@@ -79,7 +82,7 @@ data class QuotaSnapshot(
  * visible even while last-known-good numbers are shown.
  */
 fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot {
-    val freshSuccessNames = successes.map { it.quota.name }.toSet()
+    val freshSuccessKeys = successes.map { it.service to it.quota.name }.toSet()
     // Services still "actively reporting" this round: they produced a Success or an Error.
     // A service seen only as Unavailable (or not seen at all) is deliberately down — no retention.
     val activeServices = results
@@ -88,7 +91,7 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .toSet()
 
     val retainedStale = previous.successes
-        .filter { it.quota.name !in freshSuccessNames }
+        .filter { (it.service to it.quota.name) !in freshSuccessKeys }
         .filter { it.service in activeServices }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 

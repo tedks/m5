@@ -58,7 +58,7 @@ class QuotaSnapshotMergeTest {
     fun `partial success retains the missing sub-quota under the same service`() {
         // I2: ClaudeScraper emits two quotas under "claude"; a partial settle returns only one.
         // The other, previously-good sub-quota must be retained, not dropped because "claude"
-        // produced *a* success. Retention keys on quota name, not service id.
+        // produced *a* success. Retention keys on (service, quota name), not quota name alone.
         val now = 1_000_000L
         val previous = QuotaSnapshot(
             results = listOf(
@@ -146,6 +146,37 @@ class QuotaSnapshotMergeTest {
         assertEquals(1, merged.results.size)
         assertTrue(merged.results.single() is QuotaResult.Unavailable)
         assertFalse(merged.results.any { it is QuotaResult.Success })
+    }
+
+    @Test
+    fun `fresh success on one service does not suppress retention of a same-named quota on another`() {
+        // Retention keys on (service, quota name), not quota name alone — two services that
+        // happen to emit the same label must not cross-suppress each other's retention.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(
+            results = listOf(
+                success("serviceA", "Quota X", now - 10_000),
+                success("serviceB", "Quota X", now - 10_000)
+            ),
+            timestamp = now - 10_000
+        )
+        val fresh = QuotaSnapshot(
+            results = listOf(
+                success("serviceA", "Quota X", now),
+                error("serviceB", "boom")
+            ),
+            timestamp = now
+        )
+
+        val merged = fresh.mergedWith(previous, now)
+
+        assertEquals(3, merged.results.size)
+        val freshA = merged.results.single { it is QuotaResult.Success && it.service == "serviceA" } as QuotaResult.Success
+        assertEquals(now, freshA.fetchedAt)
+        val retainedB = merged.results.single { it is QuotaResult.Success && it.service == "serviceB" } as QuotaResult.Success
+        assertEquals("Quota X", retainedB.quota.name)
+        assertEquals(now - 10_000, retainedB.fetchedAt)
+        assertTrue(merged.results.any { it is QuotaResult.Error && it.service == "serviceB" })
     }
 
     @Test
