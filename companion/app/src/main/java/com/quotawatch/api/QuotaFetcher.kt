@@ -60,7 +60,7 @@ class QuotaFetcher(context: Context) {
                 val msg = try {
                     JSONObject(body).getString("message")
                 } catch (_: Exception) { "HTTP ${response.code}" }
-                return listOf(QuotaResult.Error("Actions", "$msg (needs classic token with 'user' scope)"))
+                return listOf(QuotaResult.Error("github", "$msg (needs classic token with 'user' scope)"))
             }
 
             val json = JSONObject(body)
@@ -74,10 +74,10 @@ class QuotaFetcher(context: Context) {
                 }
             }
 
-            return listOf(QuotaResult.Success(Quota("Actions", actionMinutes.toFloat(), 3000f, "min")))
+            return listOf(QuotaResult.Success("github", Quota("Actions", actionMinutes.toFloat(), 3000f, "min")))
         } catch (e: Exception) {
             Log.e(TAG, "GitHub fetch failed", e)
-            return listOf(QuotaResult.Error("GitHub", e.message ?: "Unknown error"))
+            return listOf(QuotaResult.Error("github", e.message ?: "Unknown error"))
         }
     }
 
