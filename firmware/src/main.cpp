@@ -23,7 +23,17 @@
 #define C_BLUE    0x04FF
 
 // Quota data
-#define MAX_QUOTAS 6
+// Cap raised from 6 to 12 so a second page of per-model (Fable/Spark) rows
+// fits. Memory: 12 * sizeof(Quota) (32B) = 384B static — trivial on the
+// ESP32-PICO-D4's 520KB SRAM. The parse buffer (buf[512] in parseQuotaData)
+// also bounds intake: 12 lines of "Name:used:limit:unit" (~40B worst case)
+// = ~480B, and 512 is the practical ceiling of a single BLE write anyway
+// (max negotiated ATT MTU 517 → 514B payload).
+#define MAX_QUOTAS 12
+
+// Quotas render in fixed-size pages; each page lays out independently with the
+// existing font/bar rules (compact layout kicks in above 3 rows on a page).
+#define PAGE_SIZE  6
 
 struct Quota {
     char name[16];
@@ -34,11 +44,19 @@ struct Quota {
 
 static Quota quotas[MAX_QUOTAS];
 static int numQuotas = 0;
+static int currentPage = 0;
 static bool bleConnected = false;
 static bool needsRedraw = true;
 static unsigned long lastUpdateTime = 0;
 static unsigned long lastFooterRedraw = 0;
 static bool screenOn = true;
+
+// Pages needed for the current quota count. Always >= 1 so callers can safely
+// take (page % totalPages()) without a divide-by-zero when numQuotas == 0.
+static int totalPages() {
+    if (numQuotas <= 0) return 1;
+    return (numQuotas + PAGE_SIZE - 1) / PAGE_SIZE;
+}
 
 static BLEServer* pServer = nullptr;
 
@@ -64,6 +82,10 @@ static void parseQuotaData(const char* data, size_t len) {
         }
         line = strtok_r(nullptr, "\n", &saveptr);
     }
+
+    // Stay on the current page across refreshes; only jump back to page 1 if
+    // that page no longer exists (quota count shrank).
+    if (currentPage >= totalPages()) currentPage = 0;
 }
 
 // --- Display helpers ---
@@ -225,14 +247,19 @@ static void drawScreen() {
         M5.Lcd.setCursor(30, 70);
         M5.Lcd.print("Connect via BLE");
     } else {
-        int rowH = (SCREEN_H - 44) / numQuotas;
+        int startIdx = currentPage * PAGE_SIZE;
+        int count = numQuotas - startIdx;
+        if (count > PAGE_SIZE) count = PAGE_SIZE;
+
+        // Lay out this page based on the number of rows it holds, not the total.
+        int rowH = (SCREEN_H - 44) / count;
         if (rowH > 28) rowH = 28;
-        bool compact = (numQuotas > 3);
-        for (int i = 0; i < numQuotas; i++) {
+        bool compact = (count > 3);
+        for (int i = 0; i < count; i++) {
             if (compact) {
-                drawQuotaRowCompact(i, 24 + i * rowH, rowH);
+                drawQuotaRowCompact(startIdx + i, 24 + i * rowH, rowH);
             } else {
-                drawQuotaRow(i, 24 + i * rowH);
+                drawQuotaRow(startIdx + i, 24 + i * rowH);
             }
         }
     }
