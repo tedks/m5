@@ -50,6 +50,7 @@ static bool needsRedraw = true;
 static unsigned long lastUpdateTime = 0;
 static unsigned long lastFooterRedraw = 0;
 static bool screenOn = true;
+static int brightness = 15;  // last-set brightness; restored on wake
 
 // Pages needed for the current quota count. Always >= 1 so callers can safely
 // take (page % totalPages()) without a divide-by-zero when numQuotas == 0.
@@ -331,24 +332,36 @@ void setup() {
 void loop() {
     M5.update();
 
-    // Button A (front): short press = wake/toggle screen, long press = force redraw
-    if (M5.BtnA.wasReleasefor(600)) {
-        // Long press: force redraw
-        needsRedraw = true;
-    } else if (M5.BtnA.wasPressed()) {
-        // Short press: toggle screen
+    // Button A (front): short press = next page, long press = screen on/off.
+    // When the screen is OFF, either press wakes it (no need to distinguish).
+    // Both branches act on release so a single press never fires twice; the
+    // 800ms threshold is comfortably above an intentional tap yet short enough
+    // to feel deliberate as a "hold to sleep" gesture.
+    if (M5.BtnA.wasReleasefor(800)) {
+        // Long press: toggle screen on/off.
         screenOn = !screenOn;
         if (screenOn) {
-            M5.Axp.ScreenBreath(15);  // max brightness
+            M5.Axp.ScreenBreath(brightness);
             needsRedraw = true;
         } else {
             M5.Axp.ScreenBreath(0);
+        }
+    } else if (M5.BtnA.wasReleased()) {
+        // Short press.
+        if (!screenOn) {
+            // Wake from sleep.
+            screenOn = true;
+            M5.Axp.ScreenBreath(brightness);
+            needsRedraw = true;
+        } else {
+            // Advance to the next page, wrapping around.
+            currentPage = (currentPage + 1) % totalPages();
+            needsRedraw = true;
         }
     }
 
     // Button B (side): cycle brightness
     if (M5.BtnB.wasPressed()) {
-        static int brightness = 15;
         brightness = (brightness == 15) ? 9 : 15;
         M5.Axp.ScreenBreath(brightness);
         screenOn = true;
