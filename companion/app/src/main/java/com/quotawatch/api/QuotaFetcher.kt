@@ -33,6 +33,12 @@ class QuotaFetcher(context: Context) {
             results.addAll(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fetchGitHubActions(keys.githubToken)
             })
+        } else {
+            // Emit an explicit Unavailable so "github" is never silently absent from the
+            // snapshot. The merge policy treats an absent service as deliberately gone and drops
+            // any retained last-known-good; making the "no token" state a first-class result keeps
+            // that decision honest and lets the UI show why GitHub has no numbers.
+            results.add(QuotaResult.Unavailable("github", "No GitHub token — add one in Settings"))
         }
 
         return QuotaSnapshot(results)
