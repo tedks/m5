@@ -64,29 +64,44 @@ static BLEServer* pServer = nullptr;
 // --- Parsing ---
 // Protocol: newline-separated lines of "Name:used:limit:unit"
 // Example: "Claude:17:100:%\nCodex:42:100:%\nActions:465:3000:min"
-
+// An empty payload is valid and means "zero quotas now".
+//
+// onWrite runs in the BLE host's FreeRTOS task, separate from the UI loop, and
+// we deliberately take no lock here (a general lock-free scheme is a filed
+// follow-up). To keep the torn-read window minimal we parse into a private
+// scratch, then publish quotas[]/currentPage/numQuotas together at the end with
+// numQuotas written *last* as the commit — so a redraw that observes the new
+// count also sees the matching rows and page. drawScreen() additionally guards
+// the shrink transient so it can never divide by zero.
 static void parseQuotaData(const char* data, size_t len) {
     char buf[512];
     size_t n = (len < sizeof(buf) - 1) ? len : sizeof(buf) - 1;
     memcpy(buf, data, n);
     buf[n] = '\0';
 
-    numQuotas = 0;
+    static Quota scratch[MAX_QUOTAS];  // BLE-task-private; never read by the UI task
+    int count = 0;
     char* saveptr = nullptr;
     char* line = strtok_r(buf, "\n", &saveptr);
 
-    while (line && numQuotas < MAX_QUOTAS) {
-        Quota* q = &quotas[numQuotas];
+    while (line && count < MAX_QUOTAS) {
+        Quota* q = &scratch[count];
         if (sscanf(line, "%15[^:]:%f:%f:%7s",
                    q->name, &q->used, &q->limit, q->unit) == 4) {
-            numQuotas++;
+            count++;
         }
         line = strtok_r(nullptr, "\n", &saveptr);
     }
 
-    // Stay on the current page across refreshes; only jump back to page 1 if
-    // that page no longer exists (quota count shrank).
-    if (currentPage >= totalPages()) currentPage = 0;
+    // Keep the current page across refreshes; fall back to page 1 only if it no
+    // longer exists (quota count shrank). Computed here, off the live count.
+    int pages = (count <= 0) ? 1 : (count + PAGE_SIZE - 1) / PAGE_SIZE;
+    int page = (currentPage >= pages) ? 0 : currentPage;
+
+    // Publish. Rows first, then page, then numQuotas last as the commit.
+    memcpy(quotas, scratch, sizeof(Quota) * count);
+    currentPage = page;
+    numQuotas = count;
 }
 
 // --- Display helpers ---
@@ -263,15 +278,21 @@ static void drawScreen() {
         int count = numQuotas - startIdx;
         if (count > PAGE_SIZE) count = PAGE_SIZE;
 
-        // Lay out this page based on the number of rows it holds, not the total.
-        int rowH = (SCREEN_H - 44) / count;
-        if (rowH > 28) rowH = 28;
-        bool compact = (count > 3);
-        for (int i = 0; i < count; i++) {
-            if (compact) {
-                drawQuotaRowCompact(startIdx + i, 24 + i * rowH, rowH);
-            } else {
-                drawQuotaRow(startIdx + i, 24 + i * rowH);
+        // Defensive: a concurrent BLE publish (separate task, no lock) can
+        // briefly leave currentPage pointing past a just-shrunk numQuotas.
+        // Skip rows this frame rather than divide by zero on rowH below;
+        // onWrite's needsRedraw repaints once the publish settles.
+        if (count > 0) {
+            // Lay out this page based on the number of rows it holds, not the total.
+            int rowH = (SCREEN_H - 44) / count;
+            if (rowH > 28) rowH = 28;
+            bool compact = (count > 3);
+            for (int i = 0; i < count; i++) {
+                if (compact) {
+                    drawQuotaRowCompact(startIdx + i, 24 + i * rowH, rowH);
+                } else {
+                    drawQuotaRow(startIdx + i, 24 + i * rowH);
+                }
             }
         }
     }
@@ -296,11 +317,12 @@ class ServerCallbacks : public BLEServerCallbacks {
 class QuotaWriteCallback : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) override {
         std::string val = pChar->getValue();
-        if (!val.empty()) {
-            parseQuotaData(val.c_str(), val.length());
-            lastUpdateTime = millis();
-            needsRedraw = true;
-        }
+        // Process every write, including empty ones: an empty payload means the
+        // latest refresh has zero quotas and must clear the stale display (the
+        // numQuotas==0 path renders the waiting screen) rather than be ignored.
+        parseQuotaData(val.c_str(), val.length());
+        lastUpdateTime = millis();
+        needsRedraw = true;
     }
 };
 
