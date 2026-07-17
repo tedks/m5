@@ -97,9 +97,9 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
 
     /**
      * Reactive counterpart of [loginStatus] — re-evaluates cookie presence every time the
-     * recorded outcome changes (a scrape completing, or a re-login resetting it), rather than
-     * only whenever a Composable happens to recompose for some unrelated reason. This is what
-     * closes the "cold-start / never-recomposes" staleness gap [loginStatus] alone has.
+     * recorded outcome changes (a scrape recording a fresh OK or EXPIRED), rather than only
+     * whenever a Composable happens to recompose for some unrelated reason. This is what closes
+     * the "cold-start / never-recomposes" staleness gap [loginStatus] alone has.
      */
     fun loginStatusFlow(): Flow<LoginStatus> =
         sessionStore.outcomeFlow(SERVICE).map { outcome -> loginStatusOf(hasSession(), outcome) }

@@ -74,18 +74,6 @@ fun sessionLooksValid(results: List<QuotaResult>, pageReady: Boolean = false): B
     results.any { it is QuotaResult.Success } || pageReady
 
 /**
- * Which service's login a "Done" tap on [com.quotawatch.ui.LoginWebViewScreen] just finished for,
- * derived from the login URL passed to it (`onLoginClaude`/`onLoginCodex` in MainActivity use
- * ClaudeScraper.USAGE_URL / CodexScraper.USAGE_URL, both under these origins). `null` for a URL
- * that isn't a known login origin — callers should no-op rather than guess.
- */
-fun serviceForLoginUrl(url: String): String? = when {
-    url.contains("claude.ai") -> "claude"
-    url.contains("chatgpt.com") -> "codex"
-    else -> null
-}
-
-/**
  * A retained previous [QuotaResult.Success] is only worth showing for this long before it's
  * dropped outright — past this point, presenting hour-old numbers as if they were current is
  * worse than just showing the error with no stale figure attached.

@@ -38,5 +38,5 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() = repository.refresh()
 
     /** Call when the login WebView's "Done" is tapped — see QuotaRepository.onLoginDone. */
-    fun onLoginDone(url: String) = repository.onLoginDone(url)
+    fun onLoginDone() = repository.onLoginDone()
 }

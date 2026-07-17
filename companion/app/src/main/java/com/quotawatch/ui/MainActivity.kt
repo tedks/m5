@@ -148,10 +148,11 @@ fun QuotaWatchApp(vm: QuotaViewModel) {
         LoginWebViewScreen(
             url = loginUrl!!,
             onDone = {
-                // Reset the service's recorded outcome + refresh (see
-                // QuotaRepository.onLoginDone) so a just-cleared "Session expired" doesn't keep
-                // showing after a successful re-login.
-                vm.onLoginDone(loginUrl!!)
+                // Refresh right away rather than waiting for the next periodic tick (see
+                // QuotaRepository.onLoginDone) — but deliberately does NOT touch the recorded
+                // session outcome itself. A stale "Session expired" is corrected only once the
+                // refresh's own scrape finds genuine evidence of a valid session.
+                vm.onLoginDone()
                 loginUrl = null
             }
         )

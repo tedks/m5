@@ -13,7 +13,6 @@ import com.quotawatch.api.LoginStatus
 import com.quotawatch.api.QuotaFetcher
 import com.quotawatch.api.QuotaSnapshot
 import com.quotawatch.api.mergedWith
-import com.quotawatch.api.serviceForLoginUrl
 import com.quotawatch.ble.BleClient
 import com.quotawatch.wear.WearSync
 import kotlinx.coroutines.CoroutineScope
@@ -68,7 +67,7 @@ class QuotaRepository(private val app: Application) {
     // read fetcher.claudeLoginStatus()/codexLoginStatus() synchronously inside the Composable
     // body, which only re-evaluates on some UNRELATED recomposition — a cold start could show
     // "Logged in" for a persisted EXPIRED outcome until something else happened to recompose, and
-    // an outcome change (scrape completing, re-login resetting it) never itself triggered a
+    // an outcome change (a scrape completing and recording OK/EXPIRED) never itself triggered a
     // redraw. stateIn'd here so SettingsCard can collectAsStateWithLifecycle instead. The seed
     // value is the synchronous read at construction time (same as the old behavior) so there's no
     // flash of a wrong default before the flow's first real emission arrives.
@@ -126,24 +125,22 @@ class QuotaRepository(private val app: Application) {
     /**
      * Call when the login WebView's "Done" is tapped (bd m5-7ph finding: without this, a service
      * that had gone EXPIRED kept showing "Session expired" for up to 45s after a successful
-     * re-login, until the next scheduled refresh happened to run and overwrite the stale outcome).
+     * re-login, until the next scheduled refresh happened to run and record the real result).
      *
-     * Resets the just-logged-in service's recorded outcome to UNKNOWN *before* refreshing: with a
-     * fresh cookie now present, UNKNOWN reads as LOGGED_IN via loginStatusOf immediately (optimistic
-     * — matches the pre-m5-7ph behavior of trusting cookie presence alone), rather than continuing
-     * to show the stale EXPIRED for however long the subsequent refresh's scrape takes. The refresh
-     * then runs as normal and its own recordOutcome call supersedes this with the real result.
-     *
-     * [url] is whatever was passed to the login WebView (ClaudeScraper.USAGE_URL /
-     * CodexScraper.USAGE_URL, from MainActivity's onLoginClaude/onLoginCodex); an unrecognized URL
-     * (serviceForLoginUrl returns null) just skips the reset and still refreshes.
+     * Just triggers a refresh — same as [refresh]. An earlier version of this also optimistically
+     * reset the service's recorded outcome to UNKNOWN before refreshing, on the theory that a
+     * fresh cookie should read as logged-in immediately rather than waiting out the scrape. That
+     * was wrong (caught in council review convergence): if the user taps "Done" WITHOUT actually
+     * completing login, the follow-up refresh hits the login wall again, its scrape times out or
+     * lands on a still-unrecognized interstitial, and per sessionLooksValid's contract that records
+     * nothing — so the optimistic UNKNOWN, combined with surviving stale cookies, would read as
+     * LOGGED_IN *indefinitely*, not just briefly. An EXPIRED outcome must only ever be cleared by
+     * genuine positive evidence from a scrape (sessionLooksValid / a login redirect no longer
+     * firing), never by the mere act of dismissing the login screen. Honest brief staleness while
+     * the refresh runs beats a lie that never self-corrects.
      */
-    fun onLoginDone(url: String) {
-        val service = serviceForLoginUrl(url)
-        scope.launch {
-            if (service != null) fetcher.resetSessionOutcome(service)
-            doRefresh()
-        }
+    fun onLoginDone() {
+        refresh()
     }
 
     /** Refresh on foreground if the current snapshot is empty or older than one auto-refresh tick. */

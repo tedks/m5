@@ -74,4 +74,27 @@ class LoginStatusTest {
     fun `empty results with pageReady false is not evidence`() {
         assertEquals(false, sessionLooksValid(emptyList(), pageReady = false))
     }
+
+    // ---- Regression guard: a Done tap on the login WebView must NOT itself clear EXPIRED
+    // (council review convergence finding on bd m5-7ph). An earlier version of
+    // QuotaRepository.onLoginDone optimistically reset the outcome to UNKNOWN before refreshing —
+    // but if the user taps "Done" WITHOUT actually completing login, the follow-up refresh hits
+    // the login wall again and (per sessionLooksValid's contract above) records nothing, leaving
+    // UNKNOWN standing. Combined with stale cookies surviving (Cloudflare et al., bd m5-7ph's
+    // original finding), that read as LOGGED_IN *indefinitely*, not just briefly. onLoginDone now
+    // only ever triggers a refresh and never touches the recorded outcome directly — this test
+    // pins the invariant that makes that fix correct: with the reset removed, a genuinely EXPIRED
+    // outcome plus a surviving stale cookie must keep reading SESSION_EXPIRED, not LOGGED_IN.
+
+    @Test
+    fun `EXPIRED survives a Done tap without completing login — no optimistic reset to hide behind`() {
+        // Simulates the exact regression scenario: stale cookies survive (hasSessionCookie=true,
+        // same as m5-7ph's original Cloudflare-cookie problem) and the outcome is still EXPIRED
+        // because no scrape has yet recorded anything else. Must read SESSION_EXPIRED, not
+        // LOGGED_IN — there is no code path left that could optimistically clear this to UNKNOWN.
+        assertEquals(
+            LoginStatus.SESSION_EXPIRED,
+            loginStatusOf(hasSessionCookie = true, lastOutcome = SessionOutcome.EXPIRED)
+        )
+    }
 }
