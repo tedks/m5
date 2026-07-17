@@ -147,7 +147,13 @@ fun QuotaWatchApp(vm: QuotaViewModel) {
     if (loginUrl != null) {
         LoginWebViewScreen(
             url = loginUrl!!,
-            onDone = { loginUrl = null }
+            onDone = {
+                // Reset the service's recorded outcome + refresh (see
+                // QuotaRepository.onLoginDone) so a just-cleared "Session expired" doesn't keep
+                // showing after a successful re-login.
+                vm.onLoginDone(loginUrl!!)
+                loginUrl = null
+            }
         )
     } else {
         QuotaWatchScreen(vm, onLogin = { loginUrl = it })
@@ -203,6 +209,8 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
     val keys by vm.apiKeys.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val autoRefresh by vm.autoRefreshEnabled.collectAsStateWithLifecycle()
+    val claudeLoginStatus by vm.claudeLoginStatus.collectAsStateWithLifecycle()
+    val codexLoginStatus by vm.codexLoginStatus.collectAsStateWithLifecycle()
     var showSettings by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -231,8 +239,8 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
             if (showSettings) {
                 SettingsCard(
                     keys = keys,
-                    claudeStatus = vm.fetcher.claudeLoginStatus(),
-                    codexStatus = vm.fetcher.codexLoginStatus(),
+                    claudeStatus = claudeLoginStatus,
+                    codexStatus = codexLoginStatus,
                     onUpdateKeys = vm::updateApiKeys,
                     onLoginClaude = { onLogin("https://claude.ai/settings/usage") },
                     onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/usage") }

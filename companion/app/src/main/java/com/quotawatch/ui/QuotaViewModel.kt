@@ -22,6 +22,8 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     val quotas = repository.quotas
     val refreshing = repository.refreshing
     val autoRefreshEnabled = repository.autoRefreshEnabled
+    val claudeLoginStatus = repository.claudeLoginStatus
+    val codexLoginStatus = repository.codexLoginStatus
 
     /** Call from Activity.onCreate to provide Activity context for WebView scraping. */
     fun setActivityContext(context: Context) = repository.setActivityContext(context)
@@ -34,4 +36,7 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleAutoRefresh() = repository.toggleAutoRefresh()
 
     fun refresh() = repository.refresh()
+
+    /** Call when the login WebView's "Done" is tapped — see QuotaRepository.onLoginDone. */
+    fun onLoginDone(url: String) = repository.onLoginDone(url)
 }

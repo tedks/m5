@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.quotawatch.scraper.ClaudeScraper
 import com.quotawatch.scraper.CodexScraper
+import kotlinx.coroutines.flow.Flow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -50,6 +51,19 @@ class QuotaFetcher(contextProvider: () -> Context) {
     fun isCodexLoggedIn(): Boolean = codexScraper.isLoggedIn()
     fun claudeLoginStatus(): LoginStatus = claudeScraper.loginStatus()
     fun codexLoginStatus(): LoginStatus = codexScraper.loginStatus()
+    fun claudeLoginStatusFlow(): Flow<LoginStatus> = claudeScraper.loginStatusFlow()
+    fun codexLoginStatusFlow(): Flow<LoginStatus> = codexScraper.loginStatusFlow()
+
+    /**
+     * Clears a just-logged-in-again service's recorded outcome back to UNKNOWN (bd m5-7ph finding:
+     * without this, tapping "Re-login" and getting a fresh cookie still left Settings showing
+     * "Session expired" until the next scrape completed, up to 45s later). UNKNOWN + a fresh
+     * cookie reads as LOGGED_IN immediately via loginStatusOf, and the caller is expected to
+     * trigger a refresh right after this so the real outcome supersedes it soon after.
+     */
+    suspend fun resetSessionOutcome(service: String) {
+        sessionStore.recordOutcome(service, SessionOutcome.UNKNOWN)
+    }
 
     private fun fetchGitHubActions(token: String): List<QuotaResult> {
         try {

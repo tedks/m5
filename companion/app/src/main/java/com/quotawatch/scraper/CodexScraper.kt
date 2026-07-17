@@ -8,6 +8,9 @@ import com.quotawatch.api.SessionOutcome
 import com.quotawatch.api.SessionStore
 import com.quotawatch.api.LoginStatus
 import com.quotawatch.api.loginStatusOf
+import com.quotawatch.api.sessionLooksValid
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
 class CodexScraper(contextProvider: () -> Context, private val sessionStore: SessionStore) {
@@ -92,6 +95,15 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
     /** UI-facing status: cookie present AND the last completed scrape wasn't a login redirect. */
     fun loginStatus(): LoginStatus = loginStatusOf(hasSession(), sessionStore.current(SERVICE))
 
+    /**
+     * Reactive counterpart of [loginStatus] — re-evaluates cookie presence every time the
+     * recorded outcome changes (a scrape completing, or a re-login resetting it), rather than
+     * only whenever a Composable happens to recompose for some unrelated reason. This is what
+     * closes the "cold-start / never-recomposes" staleness gap [loginStatus] alone has.
+     */
+    fun loginStatusFlow(): Flow<LoginStatus> =
+        sessionStore.outcomeFlow(SERVICE).map { outcome -> loginStatusOf(hasSession(), outcome) }
+
     /** Back-compat convenience for callers that only care about the binary case. */
     fun isLoggedIn(): Boolean = loginStatus() == LoginStatus.LOGGED_IN
 
@@ -116,10 +128,14 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
 
             Log.d(TAG, "Parsed: ${result.data.take(200)}")
             val parsed = parseUsage(result.data)
-            // Reaching a completed parse means the WebView never redirected to a login page —
-            // the session itself is fine, even if this particular parse didn't find values
-            // (e.g. a page layout change) and reports an Error.
-            sessionStore.recordOutcome(SERVICE, SessionOutcome.OK)
+            // A completed parse alone isn't proof the session is fine — a login wall/interstitial
+            // that isn't caught by the URL-based sessionExpired check could render *some* page and
+            // parse to an all-Error result. Codex has no "page actually rendered" signal like
+            // Claude's usageReady, so only an actual Success counts as evidence. See
+            // sessionLooksValid's doc.
+            if (sessionLooksValid(parsed)) {
+                sessionStore.recordOutcome(SERVICE, SessionOutcome.OK)
+            }
             parsed
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
