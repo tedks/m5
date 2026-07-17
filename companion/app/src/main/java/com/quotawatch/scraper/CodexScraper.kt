@@ -12,15 +12,24 @@ class CodexScraper(contextProvider: () -> Context) {
         const val TAG = "CodexScraper"
         const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
 
+        // ~1s at UsageScraper.POLL_INTERVAL_MS (500ms) — bounded extra polling after `weekly`
+        // settles, in case the optional 5h section (bd m5-u1d) renders a beat later and would
+        // otherwise be missed by finalizing the instant weekly alone goes stable. Bounded: never
+        // waits past this many extra ticks, and never turns "5h didn't show up in time" into an
+        // error — see UsageScraper.decidePoll.
+        private const val FIVE_HOUR_GRACE_POLLS = 2
+
         // This account's chatgpt.com/codex/cloud/settings/usage page (verified live 2026-07-17)
         // shows a "Weekly usage limit ... N% remaining" block plus Balance / per-model breakdowns.
         // OpenAI temporarily removed the "5 hour usage limit" section for Plus/Pro/Business on
         // 2026-07-13 (bd m5-u1d) — it's expected to return, so the extraction JS still looks for
         // it (bounded-gap regex, same style as weekly) but we settle on weekly alone: the 5h
         // section may legitimately not exist right now, and gating settle on it would poll the
-        // full timeout on every scrape while the removal holds. When 5h does render, the
-        // valid-and-stable poll (decoded JSON keeps changing until both fields stop moving) picks
-        // it up without any change here.
+        // full timeout on every scrape while the removal holds. When 5h does render on the SAME
+        // tick weekly settles, the ordinary valid-and-stable poll picks it up with no extra
+        // handling. When it renders a beat LATER than weekly (a real race — see UsageScraper's
+        // decidePoll), FIVE_HOUR_GRACE_POLLS gives it a short bounded window to show up before we
+        // finalize on weekly alone.
         private fun isSettled(raw: String): Boolean = try {
             val json = JSONObject(raw)
             json.optDouble("weeklyRemaining", -1.0) >= 0
@@ -74,7 +83,9 @@ class CodexScraper(contextProvider: () -> Context) {
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, isSettled = ::isSettled)
+            val result = scraper.scrape(
+                USAGE_URL, JS_EXTRACT, isSettled = ::isSettled, graceExtraPolls = FIVE_HOUR_GRACE_POLLS
+            )
             if (result.sessionExpired) {
                 return listOf(QuotaResult.Unavailable("codex", "Session expired — tap 'Re-login' in Settings"))
             }
