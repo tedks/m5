@@ -25,10 +25,12 @@
 // Quota data
 // Cap raised from 6 to 12 so a second page of per-model (Fable/Spark) rows
 // fits. Memory: 12 * sizeof(Quota) (32B) = 384B static — trivial on the
-// ESP32-PICO-D4's 520KB SRAM. The parse buffer (buf[512] in parseQuotaData)
-// also bounds intake: 12 lines of "Name:used:limit:unit" (~40B worst case)
-// = ~480B, and 512 is the practical ceiling of a single BLE write anyway
-// (max negotiated ATT MTU 517 → 514B payload).
+// ESP32-PICO-D4's 520KB SRAM. parseQuotaData copies at most sizeof(buf)-1 =
+// 511 bytes and NUL-terminates; 12 lines of "Name:used:limit:unit" (~40B
+// worst case) ≈ 480B, so real payloads fit whole. A single BLE write can
+// carry up to 514B (max ATT MTU 517 − 3B overhead); one that large is
+// truncated at 511, clipping only the tail of the last line, which then
+// fails sscanf and is skipped — no corruption of earlier rows.
 #define MAX_QUOTAS 12
 
 // Quotas render in fixed-size pages; each page lays out independently with the
