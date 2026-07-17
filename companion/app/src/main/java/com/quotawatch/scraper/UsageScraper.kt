@@ -121,6 +121,13 @@ class UsageScraper(private val context: Context) {
             webView.stopLoading()
             webView.destroy()
 
+            // claude.ai/chatgpt.com rotate session tokens on some page loads; the new
+            // cookie only lives in CookieManager's in-memory store until flushed. Flush
+            // after every attempt (success, timeout, or error) so a rotated cookie
+            // survives a process death — otherwise the next launch reuses the stale
+            // pre-rotation cookie and the service looks logged out.
+            CookieManager.getInstance().flush()
+
             // Retry on transient failure (not session expiry)
             if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
                 Log.d(TAG, "Retrying $url...")
@@ -133,12 +140,5 @@ class UsageScraper(private val context: Context) {
     fun hasSession(url: String): Boolean {
         val cookies = CookieManager.getInstance().getCookie(url)
         return !cookies.isNullOrBlank()
-    }
-
-    fun clearSession(url: String) {
-        CookieManager.getInstance().apply {
-            setCookie(url, "")
-            flush()
-        }
     }
 }
