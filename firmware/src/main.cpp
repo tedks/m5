@@ -365,29 +365,33 @@ void setup() {
 void loop() {
     M5.update();
 
-    // Button A (front): short press = next page, long press = screen on/off.
-    // When the screen is OFF, either press wakes it (no need to distinguish).
-    // Both branches act on release so a single press never fires twice; the
-    // 800ms threshold is comfortably above an intentional tap yet short enough
-    // to feel deliberate as a "hold to sleep" gesture.
+    // Button A (front). When asleep, wake immediately on press so a long hold in
+    // the dark lights up at once instead of staying black until release; that
+    // waking press is then consumed so its release neither pages nor toggles.
+    // When awake, action happens on release: short press = next page, long press
+    // (>=800ms) = sleep. The 800ms threshold is comfortably above an intentional
+    // tap yet short enough to feel deliberate as a "hold to sleep" gesture.
+    static bool consumeRelease = false;  // swallow the release of a wake press
+    if (M5.BtnA.wasPressed() && !screenOn) {
+        screenOn = true;
+        M5.Axp.ScreenBreath(brightness);
+        needsRedraw = true;
+        consumeRelease = true;
+    }
+
     if (M5.BtnA.wasReleasefor(800)) {
-        // Long press: toggle screen on/off.
-        screenOn = !screenOn;
-        if (screenOn) {
-            M5.Axp.ScreenBreath(brightness);
-            needsRedraw = true;
+        if (consumeRelease) {
+            consumeRelease = false;  // wake hold released; nothing further
         } else {
+            // Long press while awake: sleep.
+            screenOn = false;
             M5.Axp.ScreenBreath(0);
         }
     } else if (M5.BtnA.wasReleased()) {
-        // Short press.
-        if (!screenOn) {
-            // Wake from sleep.
-            screenOn = true;
-            M5.Axp.ScreenBreath(brightness);
-            needsRedraw = true;
+        if (consumeRelease) {
+            consumeRelease = false;  // wake tap released; nothing further
         } else {
-            // Advance to the next page, wrapping around.
+            // Short press while awake: next page, wrapping around.
             currentPage = (currentPage + 1) % totalPages();
             needsRedraw = true;
         }
