@@ -28,25 +28,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.quotawatch.api.ApiKeys
 import com.quotawatch.api.QuotaResult
 import com.quotawatch.api.serviceDisplayName
 import com.quotawatch.ble.BleClient
+import com.quotawatch.service.QuotaRefreshService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val vm: QuotaViewModel by viewModels()
 
+    // Guards the one-time wiring of the auto-refresh toggle → service start/stop collector.
+    private var serviceControlStarted = false
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) {}
+    ) {
+        // The user has now answered the permission dialog. If BLE permissions are granted, this is
+        // where we're first allowed to start the connectedDevice foreground service (see C1).
+        startServiceControlIfPermitted()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Give the scraper an Activity context so WebViews can render
         vm.setActivityContext(this)
         requestBlePermissions()
+
+        // If BLE permissions are already held (returning user, or a pre-S device where
+        // BLUETOOTH_CONNECT/SCAN aren't runtime permissions), start the service now. On a fresh
+        // install where the dialog is still unanswered, this is a no-op and the permissionLauncher
+        // callback starts it once the user grants.
+        startServiceControlIfPermitted()
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 QuotaWatchApp(vm)
@@ -54,11 +73,64 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Covers: user denied in-app, granted BLUETOOTH_CONNECT/SCAN from system Settings, then
+        // returned here without the Activity being recreated — startServiceControlIfPermitted()
+        // is idempotent (guarded by serviceControlStarted), so retrying here is safe.
+        startServiceControlIfPermitted()
+    }
+
+    /**
+     * Wire the auto-refresh toggle to start/stop [QuotaRefreshService], but only once the BLE
+     * runtime permissions are actually granted.
+     *
+     * C1: [QuotaRefreshService] runs as a `connectedDevice` foreground service. On Android
+     * 14+/targetSdk 35, starting such a service without holding a qualifying runtime permission
+     * (BLUETOOTH_CONNECT/SCAN) throws SecurityException — which would crash on first launch, since
+     * auto-refresh defaults on and [requestBlePermissions] fires an *async* dialog that isn't
+     * answered yet. So we gate the start on [hasBlePermissions] and (re)try from the permission
+     * callback. Idempotent — the collector is launched at most once.
+     *
+     * Collected only while the Activity is STARTED, so startForegroundService always runs from a
+     * foreground context (Android 12+ blocks background FGS starts).
+     */
+    private fun startServiceControlIfPermitted() {
+        if (serviceControlStarted) return
+        if (!hasBlePermissions()) return
+        serviceControlStarted = true
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                vm.autoRefreshEnabled.collect { enabled ->
+                    if (enabled) QuotaRefreshService.start(this@MainActivity)
+                    else QuotaRefreshService.stop(this@MainActivity)
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether the runtime permissions required to start the connectedDevice FGS are held. Pre-S,
+     * BLUETOOTH_CONNECT/SCAN aren't runtime permissions and the FGS-permission enforcement doesn't
+     * apply, so treat them as granted.
+     */
+    private fun hasBlePermissions(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
     private fun requestBlePermissions() {
         val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms.add(Manifest.permission.BLUETOOTH_SCAN)
             perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        // The foreground service posts an ongoing notification; on API 33+ that needs runtime grant.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         val needed = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
