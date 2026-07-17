@@ -33,6 +33,28 @@ fun serviceDisplayName(service: String): String = when (service) {
 }
 
 /**
+ * UI-facing login status for a scraped service (bd m5-7ph). Three states instead of a plain
+ * boolean so Settings can show "Session expired" distinctly from "never logged in" — the two look
+ * identical if collapsed to a boolean, but need different user actions (log in vs. re-authenticate
+ * a session that's gone stale).
+ */
+enum class LoginStatus { LOGGED_IN, SESSION_EXPIRED, NOT_LOGGED_IN }
+
+/**
+ * Pure combination of cheap cookie presence ([hasSessionCookie], from
+ * [com.quotawatch.scraper.UsageScraper.hasSession]) and the last recorded scrape outcome
+ * ([lastOutcome], from [SessionStore]). No cookie is always NOT_LOGGED_IN regardless of a stale
+ * recorded outcome — a fresh logout wipes cookies immediately, so cookie absence is authoritative.
+ * With a cookie present, an EXPIRED outcome means the last scrape hit a login-page redirect; any
+ * other outcome (OK, or UNKNOWN before a scrape has ever run) reads as logged in.
+ */
+fun loginStatusOf(hasSessionCookie: Boolean, lastOutcome: SessionOutcome): LoginStatus = when {
+    !hasSessionCookie -> LoginStatus.NOT_LOGGED_IN
+    lastOutcome == SessionOutcome.EXPIRED -> LoginStatus.SESSION_EXPIRED
+    else -> LoginStatus.LOGGED_IN
+}
+
+/**
  * A retained previous [QuotaResult.Success] is only worth showing for this long before it's
  * dropped outright — past this point, presenting hour-old numbers as if they were current is
  * worse than just showing the error with no stale figure attached.

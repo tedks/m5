@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.quotawatch.api.ApiKeys
+import com.quotawatch.api.LoginStatus
 import com.quotawatch.api.QuotaResult
 import com.quotawatch.api.serviceDisplayName
 import com.quotawatch.ble.BleClient
@@ -230,8 +231,8 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
             if (showSettings) {
                 SettingsCard(
                     keys = keys,
-                    claudeLoggedIn = vm.fetcher.isClaudeLoggedIn(),
-                    codexLoggedIn = vm.fetcher.isCodexLoggedIn(),
+                    claudeStatus = vm.fetcher.claudeLoginStatus(),
+                    codexStatus = vm.fetcher.codexLoginStatus(),
                     onUpdateKeys = vm::updateApiKeys,
                     onLoginClaude = { onLogin("https://claude.ai/settings/usage") },
                     onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/usage") }
@@ -317,11 +318,19 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
     }
 }
 
+/** Label + color for a [LoginStatus], shared by the Claude and Codex rows below. */
+@Composable
+private fun loginStatusLabelAndColor(status: LoginStatus): Pair<String, Color> = when (status) {
+    LoginStatus.LOGGED_IN -> "Logged in" to Color(0xFF4CAF50)
+    LoginStatus.SESSION_EXPIRED -> "Session expired" to MaterialTheme.colorScheme.error
+    LoginStatus.NOT_LOGGED_IN -> "Not logged in" to MaterialTheme.colorScheme.onSurfaceVariant
+}
+
 @Composable
 fun SettingsCard(
     keys: ApiKeys,
-    claudeLoggedIn: Boolean,
-    codexLoggedIn: Boolean,
+    claudeStatus: LoginStatus,
+    codexStatus: LoginStatus,
     onUpdateKeys: (ApiKeys) -> Unit,
     onLoginClaude: () -> Unit,
     onLoginCodex: () -> Unit
@@ -339,15 +348,11 @@ fun SettingsCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Claude Code", fontWeight = FontWeight.Medium)
-                    Text(
-                        if (claudeLoggedIn) "Logged in" else "Not logged in",
-                        fontSize = 12.sp,
-                        color = if (claudeLoggedIn) Color(0xFF4CAF50)
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val (label, color) = loginStatusLabelAndColor(claudeStatus)
+                    Text(label, fontSize = 12.sp, color = color)
                 }
                 OutlinedButton(onClick = onLoginClaude) {
-                    Text(if (claudeLoggedIn) "Re-login" else "Log in")
+                    Text(if (claudeStatus == LoginStatus.NOT_LOGGED_IN) "Log in" else "Re-login")
                 }
             }
 
@@ -355,15 +360,11 @@ fun SettingsCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Codex", fontWeight = FontWeight.Medium)
-                    Text(
-                        if (codexLoggedIn) "Logged in" else "Not logged in",
-                        fontSize = 12.sp,
-                        color = if (codexLoggedIn) Color(0xFF4CAF50)
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val (label, color) = loginStatusLabelAndColor(codexStatus)
+                    Text(label, fontSize = 12.sp, color = color)
                 }
                 OutlinedButton(onClick = onLoginCodex) {
-                    Text(if (codexLoggedIn) "Re-login" else "Log in")
+                    Text(if (codexStatus == LoginStatus.NOT_LOGGED_IN) "Log in" else "Re-login")
                 }
             }
 

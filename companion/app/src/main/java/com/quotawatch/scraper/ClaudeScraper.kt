@@ -4,13 +4,19 @@ import android.content.Context
 import android.util.Log
 import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
+import com.quotawatch.api.SessionOutcome
+import com.quotawatch.api.SessionStore
+import com.quotawatch.api.LoginStatus
+import com.quotawatch.api.loginStatusOf
 import org.json.JSONObject
 
-class ClaudeScraper(contextProvider: () -> Context) {
+class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: SessionStore) {
 
     companion object {
         const val TAG = "ClaudeScraper"
         const val USAGE_URL = "https://claude.ai/settings/usage"
+        const val ORIGIN = "https://claude.ai"
+        const val SERVICE = "claude"
 
         // claude.ai/settings/usage client-redirects to /new#settings/usage and renders usage as a
         // modal ([role="dialog"]) over the app shell. The 5-hour ("Current session") and weekly
@@ -68,24 +74,44 @@ class ClaudeScraper(contextProvider: () -> Context) {
 
     private val scraper = UsageScraper(contextProvider)
 
-    fun isLoggedIn(): Boolean = scraper.hasSession("https://claude.ai")
+    /**
+     * Cheap prerequisite check used to gate whether a scrape is even attempted — cookie presence
+     * only, deliberately not the stricter [loginStatus]. A stale EXPIRED outcome must not stop us
+     * from re-attempting a scrape once a fresh cookie shows up (e.g. the user just re-logged in);
+     * the scrape itself is what updates the outcome.
+     */
+    private fun hasSession(): Boolean = scraper.hasSession(ORIGIN)
+
+    /** UI-facing status: cookie present AND the last completed scrape wasn't a login redirect. */
+    fun loginStatus(): LoginStatus = loginStatusOf(hasSession(), sessionStore.current(SERVICE))
+
+    /** Back-compat convenience for callers that only care about the binary case. */
+    fun isLoggedIn(): Boolean = loginStatus() == LoginStatus.LOGGED_IN
 
     suspend fun fetchUsage(): List<QuotaResult> {
-        if (!isLoggedIn()) {
+        if (!hasSession()) {
             return listOf(QuotaResult.Unavailable("claude", "Tap 'Log in' next to Claude Code in Settings"))
         }
 
         return try {
             val result = scraper.scrape(USAGE_URL, JS_EXTRACT, isSettled = ::isSettled)
             if (result.sessionExpired) {
+                sessionStore.recordOutcome(SERVICE, SessionOutcome.EXPIRED)
                 return listOf(QuotaResult.Unavailable("claude", "Session expired — tap 'Re-login' in Settings"))
             }
             if (result.data == null) {
+                // Timeout without a login redirect — a network/render problem, not evidence about
+                // the session either way, so the last recorded outcome is left untouched.
                 return listOf(QuotaResult.Error("claude", "Page load timed out"))
             }
 
             Log.d(TAG, "Parsed: ${result.data.take(200)}")
-            parseUsage(result.data)
+            val parsed = parseUsage(result.data)
+            // Reaching a completed parse means the WebView never redirected to a login page —
+            // the session itself is fine, even if this particular parse didn't find values
+            // (e.g. a page layout change) and reports an Error.
+            sessionStore.recordOutcome(SERVICE, SessionOutcome.OK)
+            parsed
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
             listOf(QuotaResult.Error("claude", e.message ?: "Scrape failed"))
