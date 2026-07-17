@@ -1,5 +1,6 @@
 package com.quotawatch.data
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.util.Log
@@ -53,8 +54,10 @@ class QuotaRepository(private val app: Application) {
     // (Application context fails on some devices, see 046ec8c) without holding the destroyed
     // Activity alive. The provider prefers the live Activity and only falls back to the
     // Application context when none is set (e.g. a purely-background service refresh).
+    // A destroyed-but-not-yet-collected Activity is skipped too — inflating a WebView against a
+    // destroyed Activity context crashes, so fall back to the app context in that window.
     private var activityRef: WeakReference<Context> = WeakReference<Context>(null)
-    val fetcher = QuotaFetcher { activityRef.get() ?: app }
+    val fetcher = QuotaFetcher { (activityRef.get() as? Activity)?.takeUnless { it.isDestroyed } ?: app }
 
     val apiKeys: StateFlow<ApiKeys> = keyStore.keys
         .stateIn(scope, SharingStarted.Eagerly, ApiKeys())
@@ -77,6 +80,9 @@ class QuotaRepository(private val app: Application) {
     }
 
     init {
+        // ProcessLifecycleOwner.get() must be touched from the main thread, so the repository's
+        // lazy first init must happen on the main thread — true today, since it's constructed from
+        // QuotaViewModel init and QuotaRefreshService.onCreate, both on the main thread.
         ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundObserver)
     }
 
