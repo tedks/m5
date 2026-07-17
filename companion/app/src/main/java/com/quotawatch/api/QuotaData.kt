@@ -121,6 +121,9 @@ data class QuotaSnapshot(
  *
  * Any fresh Error/Unavailable is kept as-is alongside a retained Success, so the failure stays
  * visible even while last-known-good numbers are shown.
+ *
+ * The merged list is also sorted into a stable, deterministic order (bd m5-73a) — see
+ * [QUOTA_RESULT_ORDER].
  */
 fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot {
     val freshSuccessKeys = successes.map { it.service to it.quota.name }.toSet()
@@ -136,5 +139,36 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .filter { it.service in activeServices }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
-    return copy(results = results + retainedStale)
+    return copy(results = (results + retainedStale).sortedWith(QUOTA_RESULT_ORDER))
 }
+
+/**
+ * Canonical service order for display and the BLE payload. Unknown service ids (anything added
+ * later that this list hasn't been updated for) sort after all known ones, alphabetically among
+ * themselves via [QUOTA_RESULT_ORDER]'s service-id tiebreak.
+ */
+private val SERVICE_ORDER = listOf("claude", "codex", "github")
+
+private fun serviceRank(service: String): Int {
+    val idx = SERVICE_ORDER.indexOf(service)
+    return if (idx >= 0) idx else Int.MAX_VALUE
+}
+
+/**
+ * Deterministic ordering for a merged results list (bd m5-73a). Without this, [mergedWith] used
+ * to append retained-stale quotas at the tail of the list (`results + retainedStale`), so a
+ * carried-over quota jumped to the bottom of the UI and the tail of the BLE payload on the round
+ * it went stale, then jumped back once fresh again — visible churn, and a quota that's
+ * consistently retained late in a busy snapshot could fall past the firmware's 6-line display cap
+ * entirely.
+ *
+ * Sort key is (canonical service rank, service id, quota name — empty for Error/Unavailable,
+ * which have none, so they group with their service's successes rather than interleaving by
+ * name). Deliberately depends on nothing but (service, quota name) — never `fetchedAt` or any
+ * other freshness signal — so the same *set* of quotas always sorts into the same order
+ * regardless of which ones arrived fresh this round vs. were retained from the previous one.
+ */
+private val QUOTA_RESULT_ORDER: Comparator<QuotaResult> =
+    compareBy<QuotaResult> { serviceRank(it.service) }
+        .thenBy { it.service }
+        .thenBy { (it as? QuotaResult.Success)?.quota?.name ?: "" }
