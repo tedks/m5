@@ -59,4 +59,7 @@ dependencies {
 
     // WorkManager for background sync
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    // Unit tests
+    testImplementation("junit:junit:4.13.2")
 }

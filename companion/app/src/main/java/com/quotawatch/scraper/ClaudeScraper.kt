@@ -22,16 +22,16 @@ class ClaudeScraper(context: Context) {
 
     suspend fun fetchUsage(): List<QuotaResult> {
         if (!isLoggedIn()) {
-            return listOf(QuotaResult.Unavailable("Claude", "Tap 'Log in' next to Claude Code in Settings"))
+            return listOf(QuotaResult.Unavailable("claude", "Tap 'Log in' next to Claude Code in Settings"))
         }
 
         return try {
             val result = scraper.scrape(USAGE_URL, JS_EXTRACT, injectDelayMs = INJECT_DELAY_MS)
             if (result.sessionExpired) {
-                return listOf(QuotaResult.Unavailable("Claude", "Session expired — tap 'Re-login' in Settings"))
+                return listOf(QuotaResult.Unavailable("claude", "Session expired — tap 'Re-login' in Settings"))
             }
             if (result.data == null) {
-                return listOf(QuotaResult.Error("Claude", "Page load timed out"))
+                return listOf(QuotaResult.Error("claude", "Page load timed out"))
             }
 
             val jsonStr = result.data.trim().removeSurrounding("\"").replace("\\\"", "\"")
@@ -41,30 +41,30 @@ class ClaudeScraper(context: Context) {
             val json = JSONObject(jsonStr)
 
             if (json.has("error")) {
-                return listOf(QuotaResult.Error("Claude", json.getString("error")))
+                return listOf(QuotaResult.Error("claude", json.getString("error")))
             }
 
             val results = mutableListOf<QuotaResult>()
 
             val fiveHourPct = json.optDouble("fiveHourPct", -1.0)
             if (fiveHourPct >= 0) {
-                results.add(QuotaResult.Success(Quota("Claude 5h", fiveHourPct.toFloat(), 100f, "%")))
+                results.add(QuotaResult.Success("claude", Quota("Claude 5h", fiveHourPct.toFloat(), 100f, "%")))
             }
 
             val sevenDayPct = json.optDouble("sevenDayPct", -1.0)
             if (sevenDayPct >= 0) {
-                results.add(QuotaResult.Success(Quota("Claude wk", sevenDayPct.toFloat(), 100f, "%")))
+                results.add(QuotaResult.Success("claude", Quota("Claude wk", sevenDayPct.toFloat(), 100f, "%")))
             }
 
             if (results.isEmpty()) {
                 val text = json.optString("text", "")
-                results.add(QuotaResult.Error("Claude", "Could not parse usage. Page text: ${text.take(200)}"))
+                results.add(QuotaResult.Error("claude", "Could not parse usage. Page text: ${text.take(200)}"))
             }
 
             results
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
-            listOf(QuotaResult.Error("Claude", e.message ?: "Scrape failed"))
+            listOf(QuotaResult.Error("claude", e.message ?: "Scrape failed"))
         }
     }
 

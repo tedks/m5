@@ -9,6 +9,7 @@ import com.quotawatch.api.ApiKeys
 import com.quotawatch.api.KeyStore
 import com.quotawatch.api.QuotaFetcher
 import com.quotawatch.api.QuotaSnapshot
+import com.quotawatch.api.mergedWith
 import com.quotawatch.ble.BleClient
 import com.quotawatch.wear.WearSync
 import kotlinx.coroutines.Dispatchers
@@ -92,7 +93,10 @@ class QuotaViewModel(app: Application) : AndroidViewModel(app) {
         if (_refreshing.value) return
         _refreshing.value = true
         try {
-            val snapshot = fetcher.fetchAll(apiKeys.value)
+            val fresh = fetcher.fetchAll(apiKeys.value)
+            // Merge with the last snapshot so a transiently-failing service doesn't blank out
+            // its numbers on the UI/BLE payload — see QuotaSnapshot.mergedWith for the semantics.
+            val snapshot = fresh.mergedWith(_quotas.value, System.currentTimeMillis())
             _quotas.value = snapshot
 
             if (bleClient.state.value is BleClient.State.Connected) {
