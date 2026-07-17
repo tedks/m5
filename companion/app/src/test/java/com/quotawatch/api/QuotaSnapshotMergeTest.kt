@@ -234,9 +234,15 @@ class QuotaSnapshotMergeTest {
         val githubIndex = order.indexOf("Actions")
         assertTrue("retained Claude wk ($claudeWkIndex) must sort before github Actions ($githubIndex)",
             claudeWkIndex < githubIndex)
-        // And it should be immediately adjacent to the other claude entries (index 0/1 are the
-        // fresh "Claude 5h" success and "claude:error"), not separated from its own service group.
-        assertTrue("retained Claude wk must be within the claude group", claudeWkIndex <= 2)
+        // Exact full order: within the claude group, sort key is (quota name, or "" for the
+        // Error) — "" sorts before any non-empty name, so "claude:error" (empty tiebreak) comes
+        // BEFORE "Claude 5h", which then comes before "Claude wk" ("5h" < "wk" lexicographically).
+        // The retained "Claude wk" lands third overall, immediately after the other two claude
+        // entries — not appended after codex/github.
+        assertEquals(
+            listOf("claude:error", "Claude 5h", "Claude wk", "Codex wk", "Actions"),
+            order
+        )
     }
 
     @Test

@@ -163,10 +163,19 @@ private fun serviceRank(service: String): Int {
  * entirely.
  *
  * Sort key is (canonical service rank, service id, quota name — empty for Error/Unavailable,
- * which have none, so they group with their service's successes rather than interleaving by
- * name). Deliberately depends on nothing but (service, quota name) — never `fetchedAt` or any
- * other freshness signal — so the same *set* of quotas always sorts into the same order
+ * which have none). Deliberately depends on nothing but (service, quota name) — never `fetchedAt`
+ * or any other freshness signal — so the same *set* of quotas always sorts into the same order
  * regardless of which ones arrived fresh this round vs. were retained from the previous one.
+ *
+ * What this ordering actually reaches: [QuotaSnapshot.toBlePayload] iterates `quotas`
+ * (successes only, in this sorted order) directly, so the BLE payload's line order is exactly
+ * this. The phone UI (`QuotaWatchScreen` in MainActivity) does NOT render `results` directly —
+ * it renders three separate loops over `snapshot.successes`, then `snapshot.errors`, then
+ * `snapshot.unavailable`, each filtered from this same sorted `results` list — so on-screen,
+ * this ordering governs the successes' relative order (the actual fix for the reported churn) and
+ * separately the errors' and the unavailables' relative order among themselves, but a service's
+ * error/unavailable card never appears interleaved with its success cards regardless of where
+ * this comparator would place it in the unfiltered list.
  */
 private val QUOTA_RESULT_ORDER: Comparator<QuotaResult> =
     compareBy<QuotaResult> { serviceRank(it.service) }
