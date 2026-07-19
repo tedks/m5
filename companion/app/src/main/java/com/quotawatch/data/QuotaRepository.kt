@@ -98,6 +98,33 @@ class QuotaRepository(private val app: Application) {
         // lazy first init must happen on the main thread — true today, since it's constructed from
         // QuotaViewModel init and QuotaRefreshService.onCreate, both on the main thread.
         ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundObserver)
+        observeBleConnectionsForPush()
+    }
+
+    /**
+     * Push the current snapshot to the M5 the instant it (re)connects (gh #17). Without this,
+     * doRefresh() is the only thing that ever sends the BLE payload, and only when a refresh
+     * happens to complete while already Connected — a connection established *between* refresh
+     * cycles (the normal case: the user opens the app, taps Connect, and the M5 pairs) left the
+     * watch showing nothing until the next scheduled or manual refresh.
+     *
+     * Runs for the repository's whole process lifetime, same as [foregroundObserver] — BLE can
+     * connect/reconnect at any point regardless of whether an Activity is in front.
+     */
+    private fun observeBleConnectionsForPush() {
+        scope.launch {
+            var previousState: BleClient.State? = null
+            bleClient.state.collect { current ->
+                if (isFreshBleConnection(previousState, current)) {
+                    val snapshot = _quotas.value
+                    if (snapshot.quotas.isNotEmpty()) {
+                        Log.d(TAG, "BLE connected — pushing current snapshot (${snapshot.quotas.size} quotas)")
+                        bleClient.sendQuotaData(snapshot.toBlePayload())
+                    }
+                }
+                previousState = current
+            }
+        }
     }
 
     /** Provide the live Activity context for WebView scraping; call from Activity.onCreate. */
@@ -186,3 +213,18 @@ class QuotaRepository(private val app: Application) {
         }
     }
 }
+
+/**
+ * Whether a BLE state transition from [previous] to [current] is the moment to push the current
+ * quota snapshot (gh #17) — pure and unit-testable without a real [BleClient].
+ *
+ * True exactly on arriving at [BleClient.State.Connected] from anything else, including
+ * [BleClient.State.Reconnecting] -> [BleClient.State.Connected]: the M5 may have rebooted and
+ * lost whatever it last held, so a reconnection deserves a fresh push same as a first connection.
+ * False if [current] isn't Connected, and false if [previous] was already Connected — the latter
+ * guards against resending on some unrelated re-emission of the same state rather than a genuine
+ * transition (StateFlow itself already dedupes structurally-equal consecutive values, but this
+ * keeps the "only on an actual transition" contract explicit and independently testable).
+ */
+fun isFreshBleConnection(previous: BleClient.State?, current: BleClient.State): Boolean =
+    current is BleClient.State.Connected && previous !is BleClient.State.Connected
