@@ -8,8 +8,8 @@ type: bugfix
 component: default
 release:
 reporter: tedks
-status: unstarted
-disposition:
+status: closed
+disposition: fixed
 creation_time: 2026-07-17T01:56:58.640254649-04:00
 references: []
 log_events:
@@ -21,3 +21,9 @@ log_events:
   who: tedks
   what: imported from beads
   comment: priority=2; updated_at=2026-07-17T01:56:58.640254649-04:00
+- time: 2026-07-19T05:05:06-00:00
+  who: Ted Smith
+  what: 'closed: fixed'
+  comment: 'Fixed in PR #14 (merged 1733563): login status driven by last scrape outcome
+    (SessionStore, three-state LoginStatus) instead of any-cookie-exists. (bd worktree
+    close lost pre-flush; reconciled post-migration.)'
