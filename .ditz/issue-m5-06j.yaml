@@ -1,0 +1,27 @@
+id: m5-06j
+title: WebView OAuth login flow for Claude
+desc: 'Replace manual OAuth token pasting with in-app WebView login for Claude. Current
+  problem: OAuth tokens rotate every few hours. Proposed: WebView login to claude.ai
+  captures OAuth token, or scrapes usage page directly via injected JS. WebView approach
+  avoids undocumented API concerns. Same pattern could work for Codex via chatgpt.com/codex/settings/usage.'
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-05-26T19:24:35.199846561-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.199846561-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.199846561-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-27T20:29:56.166546372-04:00
+- time: 2026-05-27T20:29:56.16655083-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: ""
