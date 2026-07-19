@@ -193,4 +193,103 @@ class QuotaSnapshotMergeTest {
         assertEquals(fresh.results, merged.results)
         assertEquals(fresh.timestamp, merged.timestamp)
     }
+
+    // ---- Stable ordering (bd m5-73a) ----
+
+    private fun nameOf(r: QuotaResult): String = when (r) {
+        is QuotaResult.Success -> r.quota.name
+        is QuotaResult.Error -> "${r.service}:error"
+        is QuotaResult.Unavailable -> "${r.service}:unavailable"
+    }
+
+    @Test
+    fun `retained item is slotted adjacent to its service, not appended at the tail`() {
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(
+            results = listOf(
+                success("claude", "Claude 5h", now - 10_000),
+                success("claude", "Claude wk", now - 10_000),
+                success("codex", "Codex wk", now - 10_000)
+            ),
+            timestamp = now - 10_000
+        )
+        // This round: Claude wk fails to parse (retained), Codex wk and GitHub Actions are fresh.
+        val fresh = QuotaSnapshot(
+            results = listOf(
+                success("claude", "Claude 5h", now),
+                error("claude", "timed out"),
+                success("codex", "Codex wk", now),
+                success("github", "Actions", now)
+            ),
+            timestamp = now
+        )
+
+        val merged = fresh.mergedWith(previous, now)
+
+        // The old behavior appended retained items at the tail: [..., github Actions, claude wk].
+        // The retained "Claude wk" must instead land next to the other claude entries, ahead of
+        // codex/github — not at the very end of the list.
+        val order = merged.results.map { nameOf(it) }
+        val claudeWkIndex = order.indexOf("Claude wk")
+        val githubIndex = order.indexOf("Actions")
+        assertTrue("retained Claude wk ($claudeWkIndex) must sort before github Actions ($githubIndex)",
+            claudeWkIndex < githubIndex)
+        // Exact full order: within the claude group, sort key is (quota name, or "" for the
+        // Error) — "" sorts before any non-empty name, so "claude:error" (empty tiebreak) comes
+        // BEFORE "Claude 5h", which then comes before "Claude wk" ("5h" < "wk" lexicographically).
+        // The retained "Claude wk" lands third overall, immediately after the other two claude
+        // entries — not appended after codex/github.
+        assertEquals(
+            listOf("claude:error", "Claude 5h", "Claude wk", "Codex wk", "Actions"),
+            order
+        )
+    }
+
+    @Test
+    fun `merged order is stable across two rounds regardless of which quota is retained each time`() {
+        val t0 = 1_000_000L
+        val snapshot0 = QuotaSnapshot(
+            results = listOf(
+                success("claude", "Claude 5h", t0),
+                success("claude", "Claude wk", t0),
+                success("codex", "Codex wk", t0),
+                success("github", "Actions", t0)
+            ),
+            timestamp = t0
+        )
+
+        // Round 1: Claude wk fails and is retained from snapshot0; everything else is fresh.
+        val t1 = t0 + 60_000
+        val fresh1 = QuotaSnapshot(
+            results = listOf(
+                success("claude", "Claude 5h", t1),
+                error("claude", "timed out"),
+                success("codex", "Codex wk", t1),
+                success("github", "Actions", t1)
+            ),
+            timestamp = t1
+        )
+        val merged1 = fresh1.mergedWith(snapshot0, t1)
+
+        // Round 2: this time Codex wk fails instead and is retained from merged1; Claude wk is
+        // fresh again.
+        val t2 = t1 + 60_000
+        val fresh2 = QuotaSnapshot(
+            results = listOf(
+                success("claude", "Claude 5h", t2),
+                success("claude", "Claude wk", t2),
+                error("codex", "timed out"),
+                success("github", "Actions", t2)
+            ),
+            timestamp = t2
+        )
+        val merged2 = fresh2.mergedWith(merged1, t2)
+
+        // Same set of quota names both rounds -> same order, even though a different quota was
+        // the one retained-from-previous in each round.
+        val order1 = merged1.successes.map { it.quota.name }
+        val order2 = merged2.successes.map { it.quota.name }
+        assertEquals(order1, order2)
+        assertEquals(listOf("Claude 5h", "Claude wk", "Codex wk", "Actions"), order1)
+    }
 }

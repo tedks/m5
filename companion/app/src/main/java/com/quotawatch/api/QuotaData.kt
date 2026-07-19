@@ -121,6 +121,9 @@ data class QuotaSnapshot(
  *
  * Any fresh Error/Unavailable is kept as-is alongside a retained Success, so the failure stays
  * visible even while last-known-good numbers are shown.
+ *
+ * The merged list is also sorted into a stable, deterministic order (bd m5-73a) — see
+ * [QUOTA_RESULT_ORDER].
  */
 fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot {
     val freshSuccessKeys = successes.map { it.service to it.quota.name }.toSet()
@@ -136,5 +139,45 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .filter { it.service in activeServices }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
-    return copy(results = results + retainedStale)
+    return copy(results = (results + retainedStale).sortedWith(QUOTA_RESULT_ORDER))
 }
+
+/**
+ * Canonical service order for display and the BLE payload. Unknown service ids (anything added
+ * later that this list hasn't been updated for) sort after all known ones, alphabetically among
+ * themselves via [QUOTA_RESULT_ORDER]'s service-id tiebreak.
+ */
+private val SERVICE_ORDER = listOf("claude", "codex", "github")
+
+private fun serviceRank(service: String): Int {
+    val idx = SERVICE_ORDER.indexOf(service)
+    return if (idx >= 0) idx else Int.MAX_VALUE
+}
+
+/**
+ * Deterministic ordering for a merged results list (bd m5-73a). Without this, [mergedWith] used
+ * to append retained-stale quotas at the tail of the list (`results + retainedStale`), so a
+ * carried-over quota jumped to the bottom of the UI and the tail of the BLE payload on the round
+ * it went stale, then jumped back once fresh again — visible churn, and a quota that's
+ * consistently retained late in a busy snapshot could fall past the firmware's 6-line display cap
+ * entirely.
+ *
+ * Sort key is (canonical service rank, service id, quota name — empty for Error/Unavailable,
+ * which have none). Deliberately depends on nothing but (service, quota name) — never `fetchedAt`
+ * or any other freshness signal — so the same *set* of quotas always sorts into the same order
+ * regardless of which ones arrived fresh this round vs. were retained from the previous one.
+ *
+ * What this ordering actually reaches: [QuotaSnapshot.toBlePayload] iterates `quotas`
+ * (successes only, in this sorted order) directly, so the BLE payload's line order is exactly
+ * this. The phone UI (`QuotaWatchScreen` in MainActivity) does NOT render `results` directly —
+ * it renders three separate loops over `snapshot.successes`, then `snapshot.errors`, then
+ * `snapshot.unavailable`, each filtered from this same sorted `results` list — so on-screen,
+ * this ordering governs the successes' relative order (the actual fix for the reported churn) and
+ * separately the errors' and the unavailables' relative order among themselves, but a service's
+ * error/unavailable card never appears interleaved with its success cards regardless of where
+ * this comparator would place it in the unfiltered list.
+ */
+private val QUOTA_RESULT_ORDER: Comparator<QuotaResult> =
+    compareBy<QuotaResult> { serviceRank(it.service) }
+        .thenBy { it.service }
+        .thenBy { (it as? QuotaResult.Success)?.quota?.name ?: "" }
