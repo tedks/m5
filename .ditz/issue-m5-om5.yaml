@@ -1,0 +1,28 @@
+id: m5-om5
+title: "Fixed 4s/6s inject delay \u2014 poll until extraction JS returns data"
+desc: Fixed inject delay is both slow and flaky for SPAs. Poll the extraction JS every
+  ~500ms after onPageFinished until it yields valid data or TIMEOUT_MS. fix/scraper-robustness.
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.65819859-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.65819859-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.65819859-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T02:58:44.307711857-04:00
+- time: 2026-07-17T02:58:44.307711857-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: 'Implemented in fix/scraper-robustness (PR #10, draft): poll-until-settled
+    every 500ms, replacing fixed 4s/6s inject delay. Device-verified latency and correctness;
+    m5-hf9''s specific fiveHourRemaining case turned out to be a separate page-structure
+    issue, tracked as m5-iia.'
