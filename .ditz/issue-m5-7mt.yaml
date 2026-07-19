@@ -1,0 +1,31 @@
+id: m5-7mt
+title: Fix framework0 USB enumeration for M5
+desc: 'The M5StickC Plus fails to enumerate on framework0 (USB error -110 timeouts
+  on device descriptor reads). Works fine on tower0. Tried:
+
+  - Different cables (including included A-to-C cable)
+
+  - USB autosuspend disable
+
+  - Different ports
+
+
+  Likely a Realtek USB hub issue in the Framework expansion card system. Would be
+  nice to flash directly from the dev machine instead of going through tower0.'
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-05-26T19:24:35.215307132-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.215307132-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.215307132-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-26T19:24:35.215307132-04:00
