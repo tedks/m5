@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.quotawatch.api.ApiKeys
+import com.quotawatch.api.LoginStatus
 import com.quotawatch.api.QuotaResult
 import com.quotawatch.api.serviceDisplayName
 import com.quotawatch.ble.BleClient
@@ -146,7 +147,14 @@ fun QuotaWatchApp(vm: QuotaViewModel) {
     if (loginUrl != null) {
         LoginWebViewScreen(
             url = loginUrl!!,
-            onDone = { loginUrl = null }
+            onDone = {
+                // Refresh right away rather than waiting for the next periodic tick (see
+                // QuotaRepository.onLoginDone) — but deliberately does NOT touch the recorded
+                // session outcome itself. A stale "Session expired" is corrected only once the
+                // refresh's own scrape finds genuine evidence of a valid session.
+                vm.onLoginDone()
+                loginUrl = null
+            }
         )
     } else {
         QuotaWatchScreen(vm, onLogin = { loginUrl = it })
@@ -202,6 +210,8 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
     val keys by vm.apiKeys.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val autoRefresh by vm.autoRefreshEnabled.collectAsStateWithLifecycle()
+    val claudeLoginStatus by vm.claudeLoginStatus.collectAsStateWithLifecycle()
+    val codexLoginStatus by vm.codexLoginStatus.collectAsStateWithLifecycle()
     var showSettings by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -230,8 +240,8 @@ fun QuotaWatchScreen(vm: QuotaViewModel, onLogin: (String) -> Unit) {
             if (showSettings) {
                 SettingsCard(
                     keys = keys,
-                    claudeLoggedIn = vm.fetcher.isClaudeLoggedIn(),
-                    codexLoggedIn = vm.fetcher.isCodexLoggedIn(),
+                    claudeStatus = claudeLoginStatus,
+                    codexStatus = codexLoginStatus,
                     onUpdateKeys = vm::updateApiKeys,
                     onLoginClaude = { onLogin("https://claude.ai/settings/usage") },
                     onLoginCodex = { onLogin("https://chatgpt.com/codex/cloud/settings/usage") }
@@ -317,11 +327,19 @@ fun BleCard(state: BleClient.State, onConnect: () -> Unit, onDisconnect: () -> U
     }
 }
 
+/** Label + color for a [LoginStatus], shared by the Claude and Codex rows below. */
+@Composable
+private fun loginStatusLabelAndColor(status: LoginStatus): Pair<String, Color> = when (status) {
+    LoginStatus.LOGGED_IN -> "Logged in" to Color(0xFF4CAF50)
+    LoginStatus.SESSION_EXPIRED -> "Session expired" to MaterialTheme.colorScheme.error
+    LoginStatus.NOT_LOGGED_IN -> "Not logged in" to MaterialTheme.colorScheme.onSurfaceVariant
+}
+
 @Composable
 fun SettingsCard(
     keys: ApiKeys,
-    claudeLoggedIn: Boolean,
-    codexLoggedIn: Boolean,
+    claudeStatus: LoginStatus,
+    codexStatus: LoginStatus,
     onUpdateKeys: (ApiKeys) -> Unit,
     onLoginClaude: () -> Unit,
     onLoginCodex: () -> Unit
@@ -339,15 +357,11 @@ fun SettingsCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Claude Code", fontWeight = FontWeight.Medium)
-                    Text(
-                        if (claudeLoggedIn) "Logged in" else "Not logged in",
-                        fontSize = 12.sp,
-                        color = if (claudeLoggedIn) Color(0xFF4CAF50)
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val (label, color) = loginStatusLabelAndColor(claudeStatus)
+                    Text(label, fontSize = 12.sp, color = color)
                 }
                 OutlinedButton(onClick = onLoginClaude) {
-                    Text(if (claudeLoggedIn) "Re-login" else "Log in")
+                    Text(if (claudeStatus == LoginStatus.NOT_LOGGED_IN) "Log in" else "Re-login")
                 }
             }
 
@@ -355,15 +369,11 @@ fun SettingsCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Codex", fontWeight = FontWeight.Medium)
-                    Text(
-                        if (codexLoggedIn) "Logged in" else "Not logged in",
-                        fontSize = 12.sp,
-                        color = if (codexLoggedIn) Color(0xFF4CAF50)
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val (label, color) = loginStatusLabelAndColor(codexStatus)
+                    Text(label, fontSize = 12.sp, color = color)
                 }
                 OutlinedButton(onClick = onLoginCodex) {
-                    Text(if (codexLoggedIn) "Re-login" else "Log in")
+                    Text(if (codexStatus == LoginStatus.NOT_LOGGED_IN) "Log in" else "Re-login")
                 }
             }
 

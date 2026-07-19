@@ -9,6 +9,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.quotawatch.api.ApiKeys
 import com.quotawatch.api.KeyStore
+import com.quotawatch.api.LoginStatus
 import com.quotawatch.api.QuotaFetcher
 import com.quotawatch.api.QuotaSnapshot
 import com.quotawatch.api.mergedWith
@@ -62,6 +63,19 @@ class QuotaRepository(private val app: Application) {
     val apiKeys: StateFlow<ApiKeys> = keyStore.keys
         .stateIn(scope, SharingStarted.Eagerly, ApiKeys())
 
+    // Reactive login status per service (bd m5-7ph council finding): the Compose UI previously
+    // read fetcher.claudeLoginStatus()/codexLoginStatus() synchronously inside the Composable
+    // body, which only re-evaluates on some UNRELATED recomposition — a cold start could show
+    // "Logged in" for a persisted EXPIRED outcome until something else happened to recompose, and
+    // an outcome change (a scrape completing and recording OK/EXPIRED) never itself triggered a
+    // redraw. stateIn'd here so SettingsCard can collectAsStateWithLifecycle instead. The seed
+    // value is the synchronous read at construction time (same as the old behavior) so there's no
+    // flash of a wrong default before the flow's first real emission arrives.
+    val claudeLoginStatus: StateFlow<LoginStatus> = fetcher.claudeLoginStatusFlow()
+        .stateIn(scope, SharingStarted.Eagerly, fetcher.claudeLoginStatus())
+    val codexLoginStatus: StateFlow<LoginStatus> = fetcher.codexLoginStatusFlow()
+        .stateIn(scope, SharingStarted.Eagerly, fetcher.codexLoginStatus())
+
     private val _quotas = MutableStateFlow(QuotaSnapshot(emptyList()))
     val quotas: StateFlow<QuotaSnapshot> = _quotas
 
@@ -106,6 +120,27 @@ class QuotaRepository(private val app: Application) {
     /** Fire-and-forget manual refresh (e.g. the Refresh button). */
     fun refresh() {
         scope.launch { doRefresh() }
+    }
+
+    /**
+     * Call when the login WebView's "Done" is tapped (bd m5-7ph finding: without this, a service
+     * that had gone EXPIRED kept showing "Session expired" for up to 45s after a successful
+     * re-login, until the next scheduled refresh happened to run and record the real result).
+     *
+     * Just triggers a refresh — same as [refresh]. An earlier version of this also optimistically
+     * reset the service's recorded outcome to UNKNOWN before refreshing, on the theory that a
+     * fresh cookie should read as logged-in immediately rather than waiting out the scrape. That
+     * was wrong (caught in council review convergence): if the user taps "Done" WITHOUT actually
+     * completing login, the follow-up refresh hits the login wall again, its scrape times out or
+     * lands on a still-unrecognized interstitial, and per sessionLooksValid's contract that records
+     * nothing — so the optimistic UNKNOWN, combined with surviving stale cookies, would read as
+     * LOGGED_IN *indefinitely*, not just briefly. An EXPIRED outcome must only ever be cleared by
+     * genuine positive evidence from a scrape (sessionLooksValid / a login redirect no longer
+     * firing), never by the mere act of dismissing the login screen. Honest brief staleness while
+     * the refresh runs beats a lie that never self-corrects.
+     */
+    fun onLoginDone() {
+        refresh()
     }
 
     /** Refresh on foreground if the current snapshot is empty or older than one auto-refresh tick. */

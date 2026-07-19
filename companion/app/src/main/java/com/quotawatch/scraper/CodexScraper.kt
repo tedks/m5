@@ -4,13 +4,22 @@ import android.content.Context
 import android.util.Log
 import com.quotawatch.api.Quota
 import com.quotawatch.api.QuotaResult
+import com.quotawatch.api.SessionOutcome
+import com.quotawatch.api.SessionStore
+import com.quotawatch.api.LoginStatus
+import com.quotawatch.api.loginStatusOf
+import com.quotawatch.api.sessionLooksValid
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
-class CodexScraper(contextProvider: () -> Context) {
+class CodexScraper(contextProvider: () -> Context, private val sessionStore: SessionStore) {
 
     companion object {
         const val TAG = "CodexScraper"
         const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
+        const val ORIGIN = "https://chatgpt.com"
+        const val SERVICE = "codex"
 
         // ~1s at UsageScraper.POLL_INTERVAL_MS (500ms) — bounded extra polling after `weekly`
         // settles, in case the optional 5h section (bd m5-u1d) renders a beat later and would
@@ -75,10 +84,31 @@ class CodexScraper(contextProvider: () -> Context) {
 
     private val scraper = UsageScraper(contextProvider)
 
-    fun isLoggedIn(): Boolean = scraper.hasSession("https://chatgpt.com")
+    /**
+     * Cheap prerequisite check used to gate whether a scrape is even attempted — cookie presence
+     * only, deliberately not the stricter [loginStatus]. A stale EXPIRED outcome must not stop us
+     * from re-attempting a scrape once a fresh cookie shows up (e.g. the user just re-logged in);
+     * the scrape itself is what updates the outcome.
+     */
+    private fun hasSession(): Boolean = scraper.hasSession(ORIGIN)
+
+    /** UI-facing status: cookie present AND the last completed scrape wasn't a login redirect. */
+    fun loginStatus(): LoginStatus = loginStatusOf(hasSession(), sessionStore.current(SERVICE))
+
+    /**
+     * Reactive counterpart of [loginStatus] — re-evaluates cookie presence every time the
+     * recorded outcome changes (a scrape recording a fresh OK or EXPIRED), rather than only
+     * whenever a Composable happens to recompose for some unrelated reason. This is what closes
+     * the "cold-start / never-recomposes" staleness gap [loginStatus] alone has.
+     */
+    fun loginStatusFlow(): Flow<LoginStatus> =
+        sessionStore.outcomeFlow(SERVICE).map { outcome -> loginStatusOf(hasSession(), outcome) }
+
+    /** Back-compat convenience for callers that only care about the binary case. */
+    fun isLoggedIn(): Boolean = loginStatus() == LoginStatus.LOGGED_IN
 
     suspend fun fetchUsage(): List<QuotaResult> {
-        if (!isLoggedIn()) {
+        if (!hasSession()) {
             return listOf(QuotaResult.Unavailable("codex", "Tap 'Log in' next to Codex in Settings"))
         }
 
@@ -87,14 +117,26 @@ class CodexScraper(contextProvider: () -> Context) {
                 USAGE_URL, JS_EXTRACT, isSettled = ::isSettled, graceExtraPolls = FIVE_HOUR_GRACE_POLLS
             )
             if (result.sessionExpired) {
+                sessionStore.recordOutcome(SERVICE, SessionOutcome.EXPIRED)
                 return listOf(QuotaResult.Unavailable("codex", "Session expired — tap 'Re-login' in Settings"))
             }
             if (result.data == null) {
+                // Timeout without a login redirect — a network/render problem, not evidence about
+                // the session either way, so the last recorded outcome is left untouched.
                 return listOf(QuotaResult.Error("codex", "Page load timed out"))
             }
 
             Log.d(TAG, "Parsed: ${result.data.take(200)}")
-            parseUsage(result.data)
+            val parsed = parseUsage(result.data)
+            // A completed parse alone isn't proof the session is fine — a login wall/interstitial
+            // that isn't caught by the URL-based sessionExpired check could render *some* page and
+            // parse to an all-Error result. Codex has no "page actually rendered" signal like
+            // Claude's usageReady, so only an actual Success counts as evidence. See
+            // sessionLooksValid's doc.
+            if (sessionLooksValid(parsed)) {
+                sessionStore.recordOutcome(SERVICE, SessionOutcome.OK)
+            }
+            parsed
         } catch (e: Exception) {
             Log.e(TAG, "Scrape failed", e)
             listOf(QuotaResult.Error("codex", e.message ?: "Scrape failed"))

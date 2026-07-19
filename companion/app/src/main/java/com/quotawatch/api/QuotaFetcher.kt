@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.quotawatch.scraper.ClaudeScraper
 import com.quotawatch.scraper.CodexScraper
+import kotlinx.coroutines.flow.Flow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -20,8 +21,10 @@ class QuotaFetcher(contextProvider: () -> Context) {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val claudeScraper = ClaudeScraper(contextProvider)
-    private val codexScraper = CodexScraper(contextProvider)
+    // Shared across both scrapers — one DataStore file backs both services' recorded outcomes.
+    private val sessionStore = SessionStore(contextProvider)
+    private val claudeScraper = ClaudeScraper(contextProvider, sessionStore)
+    private val codexScraper = CodexScraper(contextProvider, sessionStore)
 
     suspend fun fetchAll(keys: ApiKeys): QuotaSnapshot {
         val results = mutableListOf<QuotaResult>()
@@ -46,6 +49,10 @@ class QuotaFetcher(contextProvider: () -> Context) {
 
     fun isClaudeLoggedIn(): Boolean = claudeScraper.isLoggedIn()
     fun isCodexLoggedIn(): Boolean = codexScraper.isLoggedIn()
+    fun claudeLoginStatus(): LoginStatus = claudeScraper.loginStatus()
+    fun codexLoginStatus(): LoginStatus = codexScraper.loginStatus()
+    fun claudeLoginStatusFlow(): Flow<LoginStatus> = claudeScraper.loginStatusFlow()
+    fun codexLoginStatusFlow(): Flow<LoginStatus> = codexScraper.loginStatusFlow()
 
     private fun fetchGitHubActions(token: String): List<QuotaResult> {
         try {

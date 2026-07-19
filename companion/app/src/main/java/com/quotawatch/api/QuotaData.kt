@@ -33,6 +33,47 @@ fun serviceDisplayName(service: String): String = when (service) {
 }
 
 /**
+ * UI-facing login status for a scraped service (bd m5-7ph). Three states instead of a plain
+ * boolean so Settings can show "Session expired" distinctly from "never logged in" — the two look
+ * identical if collapsed to a boolean, but need different user actions (log in vs. re-authenticate
+ * a session that's gone stale).
+ */
+enum class LoginStatus { LOGGED_IN, SESSION_EXPIRED, NOT_LOGGED_IN }
+
+/**
+ * Pure combination of cheap cookie presence ([hasSessionCookie], from
+ * [com.quotawatch.scraper.UsageScraper.hasSession]) and the last recorded scrape outcome
+ * ([lastOutcome], from [SessionStore]). No cookie is always NOT_LOGGED_IN regardless of a stale
+ * recorded outcome — a fresh logout wipes cookies immediately, so cookie absence is authoritative.
+ * With a cookie present, an EXPIRED outcome means the last scrape hit a login-page redirect; any
+ * other outcome (OK, or UNKNOWN before a scrape has ever run) reads as logged in.
+ */
+fun loginStatusOf(hasSessionCookie: Boolean, lastOutcome: SessionOutcome): LoginStatus = when {
+    !hasSessionCookie -> LoginStatus.NOT_LOGGED_IN
+    lastOutcome == SessionOutcome.EXPIRED -> LoginStatus.SESSION_EXPIRED
+    else -> LoginStatus.LOGGED_IN
+}
+
+/**
+ * Whether a completed scrape's results are positive evidence the session itself is still valid,
+ * for recording [SessionOutcome.OK] (council review finding on bd m5-7ph). Reaching a completed
+ * parse with no exception is NOT enough on its own: a login wall or interstitial that lands on a
+ * URL pattern the scraper doesn't recognize as a login redirect (so `sessionExpired` never fires)
+ * can still render *some* page and parse to an all-Error result — recording OK for that would flip
+ * a genuinely EXPIRED outcome back to "logged in" on the strength of a page that was never the
+ * real usage panel.
+ *
+ * [results] containing a [QuotaResult.Success] is always sufficient — a real quota value could
+ * only have come from the real page. Short of that, [pageReady] is an extra service-supplied
+ * signal for "the real usage panel actually rendered, just without extractable numbers" (Claude's
+ * `usageReady`, from its labeled "Plan usage limits"/"Current session"/"Weekly limits" text match —
+ * see ClaudeScraper's JS_EXTRACT). Codex has no equivalent signal today, so it always passes
+ * `pageReady = false` and relies on Success alone.
+ */
+fun sessionLooksValid(results: List<QuotaResult>, pageReady: Boolean = false): Boolean =
+    results.any { it is QuotaResult.Success } || pageReady
+
+/**
  * A retained previous [QuotaResult.Success] is only worth showing for this long before it's
  * dropped outright — past this point, presenting hour-old numbers as if they were current is
  * worse than just showing the error with no stale figure attached.
