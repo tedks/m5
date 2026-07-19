@@ -1,0 +1,28 @@
+id: m5-vk1
+title: Handle Claude OAuth token refresh
+desc: "The OAuth access token from ~/.claude/.credentials.json expires (expiresAt
+  field). The app should detect expiry and either:\n- Prompt the user to paste a new
+  token\n- Use the refresh token to get a new access token (risky \u2014 can conflict
+  with Claude Code's own refresh cycle)\n- Show a clear 'token expired' error\n\nCurrently
+  the token just silently fails when expired."
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-05-26T19:24:35.183726096-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.183726096-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.183726096-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-27T20:29:56.175426009-04:00
+- time: 2026-05-27T20:29:56.175428644-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: ""
