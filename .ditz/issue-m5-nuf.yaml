@@ -1,0 +1,33 @@
+id: m5-nuf
+title: Verify background scrape with Activity fully destroyed (pure app-context WebView)
+desc: "PR4's background-tick test passed with the stopped-but-alive Activity context
+  (HOME doesn't destroy). The Application-context fallback path (Activity destroyed,
+  e.g. task swiped from recents) is unverified \u2014 commit 046ec8c says app-context
+  WebViews fail to render on some devices. During full-stack verification: swipe the
+  task away on the physical phone, wait a 5-min service tick, check logcat for scrape
+  success. If it fails, next options are documented in PR #9 discussion (not overlay
+  hacks)."
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T02:43:28.895197556-04:00
+references: []
+log_events:
+- time: 2026-07-17T02:43:28.895197556-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T02:43:28.895197556-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T03:27:06.214432946-04:00
+- time: 2026-07-17T03:27:06.214432946-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: "Verified on device 2026-07-17: with always_finish_activities=1 (Activity
+    destroyed after HOME), the 5-min FGS tick scraped both services successfully (Claude
+    5h 8\u21929%, wk 15%; Codex wk 98% remaining). Renderer-priority policy suffices;
+    app-context/destroyed-activity WebView renders fine on this Pixel."
