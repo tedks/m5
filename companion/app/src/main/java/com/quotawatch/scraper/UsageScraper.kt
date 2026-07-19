@@ -61,6 +61,69 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 null
             }
         }
+
+        /**
+         * Settle/grace state carried between poll ticks by [decidePoll]. [lastDecoded] is the
+         * previous tick's decoded payload (the stability baseline — a tick only counts as
+         * "settled" if it matches this AND [isSettled]). [bestSettled] is the richest settled
+         * payload seen so far. [graceTicksLeft] is `null` before any settle has happened, and
+         * counts down once one has (see [decidePoll]).
+         */
+        data class PollState(
+            val lastDecoded: String? = null,
+            val bestSettled: String? = null,
+            val graceTicksLeft: Int? = null
+        )
+
+        sealed class PollDecision {
+            data class Finalize(val value: String?) : PollDecision()
+            data class Continue(val next: PollState) : PollDecision()
+        }
+
+        /**
+         * Pure settle/grace decision for one poll tick — no Handler/WebView, so it's unit-testable
+         * directly (bd m5-u1d finding: Codex's optional 5h section can render a beat after weekly
+         * settles; finalizing the instant `isSettled` first goes true can permanently miss it if
+         * it just hasn't rendered yet).
+         *
+         * With `graceExtraPolls <= 0` this finalizes on the very first settled+stable tick,
+         * identical to the original always-finalize-immediately behavior (every caller except
+         * CodexScraper passes the default 0, so this is a no-op for them).
+         *
+         * With `graceExtraPolls > 0`: the first settled+stable tick starts a BOUNDED grace window
+         * of that many additional ticks instead of finalizing immediately. Every settled+stable
+         * tick during (or starting) the window updates [PollState.bestSettled] to the richest
+         * payload seen. The window's countdown is unconditional — it decrements whether or not the
+         * current tick was itself settled — so a slow-to-render field can delay finalizing only by
+         * the fixed window, never indefinitely. When the window expires, [PollDecision.Finalize]
+         * always fires with `bestSettled` (falling back to the raw `decoded` only if, somehow, no
+         * settle was ever recorded): richer if the extra field showed up AND stabilized in time,
+         * otherwise whatever was already settled — never an unbounded wait, never an error just
+         * because the extra field never arrives.
+         */
+        fun decidePoll(
+            decoded: String?,
+            state: PollState,
+            isSettled: (String) -> Boolean,
+            graceExtraPolls: Int
+        ): PollDecision {
+            val settledNow = decoded != null && decoded == state.lastDecoded && isSettled(decoded)
+            val bestSettled = if (settledNow) decoded else state.bestSettled
+            val ticksLeft = state.graceTicksLeft
+
+            return when {
+                ticksLeft == null && settledNow && graceExtraPolls <= 0 ->
+                    PollDecision.Finalize(decoded)
+                ticksLeft == null && settledNow ->
+                    PollDecision.Continue(PollState(decoded, bestSettled, graceExtraPolls))
+                ticksLeft == null ->
+                    PollDecision.Continue(PollState(decoded, bestSettled, null))
+                ticksLeft - 1 <= 0 ->
+                    PollDecision.Finalize(bestSettled ?: decoded)
+                else ->
+                    PollDecision.Continue(PollState(decoded, bestSettled, ticksLeft - 1))
+            }
+        }
     }
 
     // Resolve the context freshly per scrape: the provider hands back the live Activity when
@@ -86,6 +149,10 @@ class UsageScraper(private val contextProvider: () -> Context) {
         url: String,
         js: String,
         isSettled: (String) -> Boolean = { true },
+        // Bounded extra ticks to keep polling after the first settle, in case a slower-rendering
+        // optional field shows up (see PollDecision/decidePoll). 0 (the default) preserves the
+        // original finalize-immediately-on-settle behavior.
+        graceExtraPolls: Int = 0,
         retryCount: Int = 0
     ): ScrapeResult =
         withContext(Dispatchers.Main) {
@@ -118,6 +185,9 @@ class UsageScraper(private val contextProvider: () -> Context) {
             var pendingPoll: Runnable? = null
             var currentUrl = url
             var lastDecoded: String? = null
+            // Drives the settle/grace decision (see PollState/decidePoll) — separate from
+            // lastDecoded above, which also serves the timeout-fallback and redirect-reset roles.
+            var pollState = PollState()
             // Flipped right before teardown (removeCallbacks/destroy). A Handler runnable can't
             // be un-posted once it starts running, and an in-flight evaluateJavascript callback
             // can't be cancelled at all — this flag stops either of them from touching the
@@ -139,21 +209,24 @@ class UsageScraper(private val contextProvider: () -> Context) {
             // isSettled AND identical to the previous poll's result. That combination naturally
             // waits out progressive SPA rendering (one panel renders before another) without a
             // per-site fixed delay: an OR-style isSettled keeps polling until every field that
-            // will show up on THIS poll's most-rendered pass has stopped changing.
+            // will show up on THIS poll's most-rendered pass has stopped changing. The actual
+            // finalize-now-vs-keep-polling decision (including the optional bounded grace window
+            // past the first settle) is delegated to the pure decidePoll — see its doc.
             fun pollOnce(view: WebView) {
                 if (isTornDown || result.isCompleted) return
                 view.evaluateJavascript(js) { jsResult ->
                     if (isTornDown || result.isCompleted) return@evaluateJavascript
                     val decoded = decodeJsResult(jsResult)
                     Log.d(TAG, "Poll result: ${decoded?.take(200)}")
-                    val settled = decoded != null && decoded == lastDecoded && safeIsSettled(decoded)
-                    if (settled) {
-                        result.complete(ScrapeResult(decoded))
-                    } else {
-                        lastDecoded = decoded
-                        val next = Runnable { pollOnce(view) }
-                        pendingPoll = next
-                        handler.postDelayed(next, POLL_INTERVAL_MS)
+                    when (val decision = decidePoll(decoded, pollState, ::safeIsSettled, graceExtraPolls)) {
+                        is PollDecision.Finalize -> result.complete(ScrapeResult(decision.value))
+                        is PollDecision.Continue -> {
+                            pollState = decision.next
+                            lastDecoded = decoded
+                            val next = Runnable { pollOnce(view) }
+                            pendingPoll = next
+                            handler.postDelayed(next, POLL_INTERVAL_MS)
+                        }
                     }
                 }
             }
@@ -170,6 +243,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
                     // previous poll's result is no longer a meaningful "did it change" baseline.
                     pendingPoll?.let { handler.removeCallbacks(it) }
                     lastDecoded = null
+                    pollState = PollState()
 
                     val start = Runnable {
                         if (LOGIN_PATTERNS.any { currentUrl.contains(it, ignoreCase = true) }) {
@@ -218,7 +292,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
             // Retry on transient failure (not session expiry)
             if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
                 Log.d(TAG, "Retrying $url...")
-                return@withContext scrape(url, js, isSettled, retryCount + 1)
+                return@withContext scrape(url, js, isSettled, graceExtraPolls, retryCount + 1)
             }
 
             scraped
