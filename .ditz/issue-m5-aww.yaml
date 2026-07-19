@@ -1,0 +1,28 @@
+id: m5-aww
+title: "QuotaFetcher retains Activity context in ViewModel \u2014 Activity leak"
+desc: QuotaViewModel.setActivityContext stores Activity-context-backed QuotaFetcher
+  in a field that outlives the Activity (rotation leak). Activity context is empirically
+  required for WebView rendering (046ec8c) so use a lifecycle-safe holder, not a plain
+  field. fix/lifecycle-refresh.
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.631254981-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.631254981-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.631254981-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T03:57:42.570989068-04:00
+- time: 2026-07-17T03:57:42.570989068-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: "Fixed in PR #8 \u2014 WeakReference context provider (+ destroyed-Activity
+    skip in PR #9's nit commit); pending merge."
