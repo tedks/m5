@@ -1,0 +1,29 @@
+id: m5-m7v
+title: Test Wear OS companion on actual watch
+desc: 'The Wear OS module compiles and the phone app syncs data via Data Layer, but
+  it hasn''t been tested on an actual Wear OS device. Need to:
+
+  - Verify WearableListenerService receives data
+
+  - Test the ScalingLazyColumn quota display
+
+  - Check if the watch needs to be on the same Google account
+
+  - Test with real quota data'
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-05-26T19:24:35.191399385-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.191399385-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.191399385-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-26T19:24:35.191399385-04:00
