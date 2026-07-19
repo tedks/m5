@@ -1,0 +1,25 @@
+id: m5-29y
+title: 'Firmware: lock-free shared state between BLE callback task and loop()'
+desc: 'Pre-existing pattern widened by PR #16: BLE onWrite (FreeRTOS task) mutates
+  numQuotas/quotas/currentPage while loop() reads them, no synchronization. PR #16''s
+  fix round stages+publishes parse results to close the concrete div-by-zero window,
+  but torn reads remain theoretically possible (worst case: one wrong frame, self-corrects).
+  Proper fix: portMUX critical section or a double-buffered payload swap. Flagged
+  by native council review 2026-07-17.'
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T12:44:11.824882069-04:00
+references: []
+log_events:
+- time: 2026-07-17T12:44:11.824882069-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T12:44:11.824882069-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=3; updated_at=2026-07-17T12:44:11.824882069-04:00
