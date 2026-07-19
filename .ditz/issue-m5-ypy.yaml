@@ -1,0 +1,24 @@
+id: m5-ypy
+title: M5 second screen (Button A scroll) with Fable/Spark per-model usage
+desc: "Mirror of github.com/tedks/m5/issues/12 \u2014 firmware screen paging via Button
+  A (interaction redesign needed: A currently toggles screen), companion scraping
+  of per-model weekly rows from the claude.ai usage modal (label-anchored only), BLE
+  payload/pagination decision. Next step after the PRs #6-#11 reliability stack."
+type: feature
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T04:37:56.44579963-04:00
+references:
+- gh-12
+log_events:
+- time: 2026-07-17T04:37:56.44579963-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T04:37:56.44579963-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T04:37:56.44579963-04:00
