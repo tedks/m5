@@ -27,3 +27,17 @@ log_events:
   comment: 'Root cause was not a render race but a phantom section: this account''s
     Codex page has no 5-hour block at all. Removed the 5h regex/field/quota; parse
     only the labeled Weekly usage limit. Fixed in PR #11.'
+- time: 2026-07-19T04:57:41-00:00
+  who: Test User
+  what: commented
+  comment: "[imported from beads comment by tedks at 2026-07-17T06:57:50Z]\n\nVerified
+    on-device after implementing fix/scraper-robustness's poll-until-settled. NOT
+    fixed by the timing change: across 3 scrape cycles, fiveHourRemaining stayed -1
+    every time while weeklyRemaining consistently parsed (99, 99, 98). Confirmed via
+    temporary debug logging that the full page text has no '5 hour usage limit' section
+    at all for this account right now \u2014 so it's not a rendering race (poll-until-settled
+    rules that out; the page genuinely stabilizes without ever showing that text).
+    Root-caused as a JS_EXTRACT/page-structure mismatch, tracked separately as m5-iia
+    (out of scope for fix/scraper-robustness, which was decode+timing only). Leaving
+    this open, downgrading my expectation that PR5 alone resolves it \u2014 see m5-iia
+    for the real fix."
