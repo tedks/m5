@@ -38,8 +38,10 @@ companion/                 Android project (Gradle/Kotlin, Jetpack Compose)
 
 flake.nix                  Nix dev shell: JDK17, Gradle, Android SDK, PlatformIO, esptool, android-tools
 .github/workflows/         CI: builds APK on push to main (updates `latest` prerelease) and on v* tags
-.beads/                    bd (beads) issue tracker database
 ```
+
+Issue tracking (`ditz`) lives on the `ditz-metadata` git branch, not as files in
+this tree — see "ditz (issue tracking)" below.
 
 **BLE protocol:** newline-separated `Name:used:limit:unit`, e.g.
 `Claude 5h:22:100:%\nCodex wk:5:100:%\nActions:465:3000:min`. Firmware shows
@@ -136,17 +138,50 @@ nix develop --command bash -c 'adb kill-server; adb start-server; adb devices'
 
 Do **not** run `adb` under `sudo` — a root-owned server fights the user one.
 
-## bd (issue tracking)
+<!-- ditz:onboard -->
+## Issue tracking with ditz
 
-This project uses **bd** (beads). Run `bd onboard` to get started.
+This project uses `ditz` (not beads). Issues are plain-text YAML on the
+`ditz-metadata` git branch; the `ditz` CLI reads and writes them.
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
-```
+The loop:
+- `ditz ready` — what to work on now (unblocked, ranked by how much each unblocks)
+- `ditz start <id>` — mark in progress
+- `ditz close <id> --reason "..."` — close with why (or `--wontfix` / `--reorg`)
+- `ditz reopen <id>` — revive a closed issue
+
+Create / inspect:
+- `ditz add "title" -t bugfix|feature|task -c <component> --desc "..."`
+- `ditz show <id>` · `ditz list --status unstarted|in_progress|paused|closed` · `ditz search <q>`
+- `--json` on any command for machine output; `--ids-only` for just ids
+- ids: copy them from output; a unique prefix works (like git hashes);
+  `--id <name>` sets a deterministic id (re-creating with it is idempotent)
+
+Structure (there are no priority / epic / parent fields — urgency is derived,
+hierarchy is expressed in the graph):
+- grouping: `-c <component>` + `ditz list --component <c>`
+- sequencing: `ditz blocks <a> <b>` (a blocks b); an "epic" is just an issue
+  blocked by its members — it stays out of `ready` until they close
+- `ditz deps <id>` shows the dependency tree; `ditz deps --check` validates it
+
+Sync: `ditz sync` fetches/merges/pushes the metadata branch (`git fetch`/`git
+push` of `ditz-metadata` against `origin`, same as any other branch).
+
+<!-- /ditz:onboard -->
+
+Notes for agents (not part of the auto-generated block above, so
+`ditz onboard` reruns won't touch these):
+- `ditz add` with no `--id` mints a full-length hash id — always pass
+  `--id <name>` for a short mnemonic id consistent with the existing
+  `m5-xxx` issues (still referenced by id in old PR/commit messages and in
+  this file, e.g. `m5-7mt` above).
+- Issues live only on the `ditz-metadata` branch, not as files in this
+  working tree — there's nothing to `git add` for issue changes.
+- A plain `git clone` already fetches `ditz-metadata`, so `ditz list`/`ditz
+  show` work immediately in a fresh clone (reading `origin/ditz-metadata`)
+  even before the first `ditz sync`.
+- Beads comments do not carry over via `ditz import`; see the migration PR
+  for how existing beads comments were backfilled with `ditz comment`.
 
 ## Landing the Plane (Session Completion)
 
@@ -160,7 +195,7 @@ bd sync               # Sync with git
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
+   ditz sync
    git push
    git status  # MUST show "up to date with origin"
    ```
