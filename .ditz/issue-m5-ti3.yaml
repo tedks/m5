@@ -1,0 +1,21 @@
+id: m5-ti3
+title: "Scrapes run sequentially \u2014 consider parallel Claude+Codex scrape"
+desc: fetchAll runs Claude then Codex serially (~10-50s each worst case). Two WebViews
+  can scrape concurrently. Follow-up after the reliability stack lands.
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T01:56:58.667379169-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.667379169-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.667379169-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=3; updated_at=2026-07-17T01:56:58.667379169-04:00
