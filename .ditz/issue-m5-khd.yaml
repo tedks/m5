@@ -1,0 +1,33 @@
+id: m5-khd
+title: Transient scrape failure wipes last-known-good quotas from UI/BLE
+desc: "QuotaViewModel wholesale-replaces _quotas with each snapshot. If Codex times
+  out, its quota vanishes from the phone UI and the M5 payload until the next success
+  \u2014 user sees 'only one service picked up'. Fix: per-service merge retaining
+  previous Success results with staleness. fix/last-known-good."
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.612607775-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.612607775-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.612607775-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=1; updated_at=2026-07-17T03:57:42.555397279-04:00
+- time: 2026-07-17T03:57:42.555397279-04:00
+  who: tedks
+  what: commented
+  comment: 'PR #7 (fix/last-known-good) opened, based on fix/cookie-persistence. Awaiting
+    review/merge.'
+- time: 2026-07-17T03:57:42.555397279-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: "Fixed in PR #7 (fix/last-known-good) \u2014 (service,name)-keyed retention
+    with active-reporting policy + tests; pending merge."
