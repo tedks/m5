@@ -1,0 +1,29 @@
+id: m5-hf9
+title: Codex 5h block not parsing on device (fiveHourRemaining=-1, weekly OK)
+desc: "During PR1 device test (2026-07-17), CodexScraper parsed weeklyRemaining=99
+  but fiveHourRemaining=-1 \u2014 the '5 hour usage limit' regex found no match. Either
+  the page section renders later than the weekly one (poll-until-ready in fix/scraper-robustness
+  may fix) or the page wording changed. Verify after PR5 lands."
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T02:04:04.049148131-04:00
+references: []
+log_events:
+- time: 2026-07-17T02:04:04.049148131-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T02:04:04.049148131-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T03:15:46.436531495-04:00
+- time: 2026-07-17T03:15:46.436531495-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: 'Root cause was not a render race but a phantom section: this account''s
+    Codex page has no 5-hour block at all. Removed the 5h regex/field/quota; parse
+    only the labeled Weekly usage limit. Fixed in PR #11.'
