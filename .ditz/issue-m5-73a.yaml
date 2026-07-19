@@ -9,8 +9,8 @@ type: task
 component: default
 release:
 reporter: tedks
-status: unstarted
-disposition:
+status: closed
+disposition: fixed
 creation_time: 2026-07-17T03:27:06.293910185-04:00
 references: []
 log_events:
@@ -22,3 +22,9 @@ log_events:
   who: tedks
   what: imported from beads
   comment: priority=3; updated_at=2026-07-17T03:27:06.293910185-04:00
+- time: 2026-07-19T05:05:06-00:00
+  who: Ted Smith
+  what: 'closed: fixed'
+  comment: 'Fixed in PR #15 (merged e89f40f): deterministic (service rank, name) sort
+    in mergedWith; retained quotas stay adjacent to their service. (bd worktree close
+    lost pre-flush; reconciled post-migration.)'
