@@ -1,0 +1,27 @@
+id: m5-u1d
+title: "Re-add tolerant Codex 5h parsing \u2014 OpenAI's removal of the 5-hour limit
+  is temporary"
+desc: "PR #11 deleted Codex 5h extraction because the usage page had no such section.
+  Web research (2026-07-17): OpenAI temporarily removed the 5-hour limit for Plus/Pro/Business
+  on 2026-07-13, so the section will likely return. Re-add a label-anchored '5 hour
+  usage limit ... N% remaining' parse that emits 'Codex 5h' when present and silently
+  skips when absent (no error, no unlabeled fallback, settle predicate unchanged \u2014
+  weekly presence still gates settling). Refs: help.openai.com/en/articles/20001106-codex-rate-card,
+  bleepingcomputer.com/news/artificial-intelligence/openai-temporarily-relaxes-gpt-56-sol-usage-limits/"
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T04:31:54.399993925-04:00
+references: []
+log_events:
+- time: 2026-07-17T04:31:54.399993925-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T04:31:54.399993925-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T04:31:54.399993925-04:00
