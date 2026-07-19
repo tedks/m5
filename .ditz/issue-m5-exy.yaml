@@ -1,0 +1,29 @@
+id: m5-exy
+title: "Scraper cookies never flushed \u2014 session rotation lost on process death"
+desc: 'CookieManager.flush() only runs in the login WebView (MainActivity onPageFinished).
+  claude.ai/chatgpt.com rotate session tokens during scrapes; rotated cookies stay
+  in RAM and die with the process, randomly logging out one service. Fix: flush after
+  every scrape in UsageScraper. Also clearSession() is dead code using setCookie(url,
+  "") which is a no-op. Fixed by PR stack: fix/cookie-persistence.'
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.602684629-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.602684629-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.602684629-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=1; updated_at=2026-07-17T03:57:42.545171428-04:00
+- time: 2026-07-17T03:57:42.545171428-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: "Fixed in PR #6 (fix/cookie-persistence) \u2014 flush after every scrape;
+    pending merge."
