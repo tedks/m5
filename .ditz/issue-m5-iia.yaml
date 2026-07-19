@@ -1,0 +1,49 @@
+id: m5-iia
+title: "Claude/Codex JS_EXTRACT selectors don't match current page \u2014 real quota
+  data still doesn't parse under fix/scraper-robustness"
+desc: "Verified on-device (2026-07-17, real accounts) after implementing fix/scraper-robustness
+  (m5-ca1/m5-om5/m5-hf9). Poll-until-settled works correctly \u2014 it reliably waits
+  for the page to stop changing \u2014 but the underlying JS_EXTRACT text/regex in
+  both scrapers still doesn't match the current page structure, independent of timing:\n\nCodex
+  (CodexScraper.JS_EXTRACT): across 3 separate scrape cycles, weeklyRemaining consistently
+  parsed correctly (99, 99, 98) but fiveHourRemaining stayed -1. Full page text (up
+  to 1000 chars, confirmed via temporary debug logging) shows NO '5 hour usage limit'
+  section at all on this account's chatgpt.com/codex/cloud/settings/usage page \u2014
+  only 'Balance', 'Weekly usage limit', and per-model breakdowns ('GPT-5.3-Codex-Spark
+  100% remaining'). The regex /5\\s*hour\\s*usage\\s*limit\\.../ has nothing to match
+  against; this is not the m5-hf9 rendering-race hypothesis (poll-until-settled rules
+  that out), it's that the page apparently no longer shows a 5-hour block in this
+  text form for this account. Needs a fresh look at the actual DOM/page (maybe behind
+  a tab, or removed from the UI) rather than a timing fix.\n\nClaude (ClaudeScraper.JS_EXTRACT):
+  consistently returns fiveHourPct=2 (then 3 on a later run) with sevenDayPct=-1,
+  and 'bars':[] (no aria progressbar elements found) every time. The percentages picked
+  up ('2%','14%','10%','0%') are the pctMatches fallback grabbing the FIRST percentage
+  found in document.body.innerText \u2014 but the visible text at settle time is the
+  collapsed sidebar/chat list (page redirects client-side from /settings/usage to
+  /new#settings/usage, i.e. a modal route), not an actual usage panel. This means
+  ClaudeScraper is likely reporting a bogus 'Claude 5h' number to the user rather
+  than failing loudly \u2014 worse than Codex's honest omission. Needs investigation
+  into what /new#settings/usage actually renders and whether the real quota UI needs
+  a selector scoped to the modal/dialog content instead of document.body.innerText."
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T02:57:44.384944144-04:00
+references: []
+log_events:
+- time: 2026-07-17T02:57:44.384944144-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T02:57:44.384944144-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=1; updated_at=2026-07-17T03:15:47.348514836-04:00; deps=discovered-from:m5-hf9
+- time: 2026-07-17T03:15:47.348514836-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: 'Both scrapers now extract only labeled usage data and fail honestly otherwise.
+    Device-verified in PR #11 (pending stack merge).'
