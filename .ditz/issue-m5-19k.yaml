@@ -1,0 +1,22 @@
+id: m5-19k
+title: Firmware OTA updates over WiFi
+desc: Add ArduinoOTA or HTTP OTA to the M5 firmware so it can be updated over WiFi
+  without re-plugging USB. Requires adding WiFi credentials to the firmware (could
+  be configured via BLE from the phone app).
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-05-28T09:48:33.238439865-04:00
+references: []
+log_events:
+- time: 2026-05-28T09:48:33.238439865-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-28T09:48:33.238439865-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-28T09:48:33.238439865-04:00
