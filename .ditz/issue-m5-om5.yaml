@@ -26,3 +26,15 @@ log_events:
     every 500ms, replacing fixed 4s/6s inject delay. Device-verified latency and correctness;
     m5-hf9''s specific fiveHourRemaining case turned out to be a separate page-structure
     issue, tracked as m5-iia.'
+- time: 2026-07-19T04:57:41-00:00
+  who: Test User
+  what: commented
+  comment: '[imported from beads comment by tedks at 2026-07-17T06:57:21Z]
+
+
+    Fixed in fix/scraper-robustness: UsageScraper.scrape() now polls the extraction
+    JS every 500ms after onPageFinished, completing when the decoded result is valid
+    (caller predicate) AND identical to the previous poll (settled). Removed INJECT_DELAY_MS/injectDelayMs.
+    On-device: Claude scrape ~3.5-4.5s wall (was fixed 6s wait alone), Codex ~3-4s
+    (was fixed 4s wait alone) -- and now correctly waits out redirects/progressive
+    rendering instead of grabbing a fixed snapshot. PR pending (draft).'
