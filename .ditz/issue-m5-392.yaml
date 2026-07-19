@@ -1,0 +1,26 @@
+id: m5-392
+title: Auto-refresh quotas on a timer
+desc: Use Android WorkManager to periodically fetch quotas and push to M5/Wear OS
+  in the background. Should respect Claude OAuth rate limits (~180s minimum interval).
+  Currently requires manual tap of Refresh button.
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-05-26T19:24:35.174098989-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.174098989-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.174098989-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-26T19:28:00.534745677-04:00
+- time: 2026-05-26T19:28:00.534749574-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: ""
