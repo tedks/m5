@@ -1,0 +1,25 @@
+id: m5-2kl
+title: 'bd sync commit fails: fork protection excludes .beads/issues.jsonl in own
+  repo'
+desc: 'bd 0.42.0 rewrites .git/info/exclude with ''.beads/issues.jsonl'' (fork protection)
+  on every sync even though origin is tedks/m5 (canonical, not a fork), so bd sync''s
+  git-add step always errors. Workaround: git add -f .beads/issues.jsonl + manual
+  commit. Investigate why bd thinks this is a fork (ZFC import artifact?) or upgrade
+  bd.'
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T01:58:46.660448365-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:58:46.660448365-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:58:46.660448365-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T01:58:46.660448365-04:00
