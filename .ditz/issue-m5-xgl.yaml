@@ -1,0 +1,29 @@
+id: m5-xgl
+title: Explore Codex/ChatGPT Pro usage scraping
+desc: "ChatGPT Pro subscription usage is not exposed via any public API. The only
+  surface is the web dashboard at chatgpt.com/codex/settings/usage. Potential approaches:\n-
+  WebView loads the usage page, JS injection scrapes the DOM\n- Intercept internal
+  API calls the page makes via WebViewClient\n- Enterprise analytics API exists but
+  is gated to Enterprise customers\n\nLow priority \u2014 may never be possible for
+  individual Pro subscribers."
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-05-26T19:24:35.207740224-04:00
+references: []
+log_events:
+- time: 2026-05-26T19:24:35.207740224-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-26T19:24:35.207740224-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-27T20:29:56.08805822-04:00
+- time: 2026-05-27T20:29:56.088064441-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: ""
