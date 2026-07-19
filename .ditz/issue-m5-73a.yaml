@@ -1,0 +1,24 @@
+id: m5-73a
+title: "Merged snapshot appends retained-stale quotas at the end \u2014 UI/BLE ordering
+  churn"
+desc: mergedWith does results + retainedStale, so carried-over quotas reorder to the
+  bottom of the UI and the tail of the BLE payload (firmware caps at 6 quotas). Cosmetic;
+  consider stable ordering by service/name. Council nit N4 from the 2026-07-17 stack
+  review.
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T03:27:06.293910185-04:00
+references: []
+log_events:
+- time: 2026-07-17T03:27:06.293910185-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T03:27:06.293910185-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=3; updated_at=2026-07-17T03:27:06.293910185-04:00
