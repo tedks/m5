@@ -25,3 +25,13 @@ log_events:
   what: 'closed: fixed'
   comment: 'Implemented in fix/scraper-robustness (PR #10, draft): decodeJsResult()
     via JSONTokener, unit tested in DecodeJsResultTest.'
+- time: 2026-07-19T04:57:41-00:00
+  who: Test User
+  what: commented
+  comment: '[imported from beads comment by tedks at 2026-07-17T06:57:21Z]
+
+
+    Fixed in fix/scraper-robustness: UsageScraper.decodeJsResult() uses org.json.JSONTokener
+    instead of chained .replace(). Unit tests in DecodeJsResultTest cover embedded
+    quotes, real newline vs literal backslash-n, unicode escapes, null/empty/malformed
+    input. PR pending (draft).'
