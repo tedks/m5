@@ -1,0 +1,22 @@
+id: m5-fet
+title: Release signing for APK
+desc: Set up a release signing keystore for the APK so sideloading does not show unknown
+  developer warnings. Generate a keystore, configure signing in build.gradle.kts,
+  add the key to CI secrets for release builds.
+type: task
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-05-28T09:48:33.248163341-04:00
+references: []
+log_events:
+- time: 2026-05-28T09:48:33.248163341-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-05-28T09:48:33.248163341-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-05-28T09:48:33.248163341-04:00
