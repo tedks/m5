@@ -1,0 +1,23 @@
+id: m5-7ph
+title: "hasSession() treats any cookie as login \u2014 Cloudflare cookies count"
+desc: UsageScraper.hasSession returns true if ANY cookie exists for the origin (__cf_bm
+  etc.), so Settings shows 'Logged in' after real session expiry and scrapes burn
+  45s before failing. Consider persisting last scrape outcome per service to drive
+  UI status.
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: unstarted
+disposition:
+creation_time: 2026-07-17T01:56:58.640254649-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.640254649-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.640254649-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=2; updated_at=2026-07-17T01:56:58.640254649-04:00
