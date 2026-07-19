@@ -1,0 +1,29 @@
+id: m5-tc1
+title: Auto-refresh stops when app unfocused; no background refresh mechanism
+desc: 'Auto-refresh is a viewModelScope while(true)/delay loop: frozen by the Android
+  12+ cached-app freezer when backgrounded, killed with the process, plus background
+  WebView renderers are paused so scrapes time out (45s) and produce Errors. Fix across
+  fix/lifecycle-refresh (lifecycle gating) + feat/foreground-service (connectedDevice
+  foreground service owning refresh+BLE, renderer priority policy).'
+type: bugfix
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.622142901-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.622142901-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.622142901-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=1; updated_at=2026-07-17T03:57:42.563182238-04:00
+- time: 2026-07-17T03:57:42.563182238-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: 'Fixed across PR #8 (lifecycle) + PR #9 (connectedDevice FGS); background
+    tick device-verified incl. Activity-destroyed case; pending merge.'
