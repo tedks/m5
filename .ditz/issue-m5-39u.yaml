@@ -1,0 +1,28 @@
+id: m5-39u
+title: "Claude JS fallback grabs first percentage on page \u2014 silent misparse risk"
+desc: ClaudeScraper JS_EXTRACT falls back to the first %-pattern in body text as fiveHourPct,
+  which can silently pick a wrong number if the page changes. Consider requiring labeled
+  context or returning unparsed.
+type: task
+component: default
+release:
+reporter: tedks
+status: closed
+disposition: fixed
+creation_time: 2026-07-17T01:56:58.67610421-04:00
+references: []
+log_events:
+- time: 2026-07-17T01:56:58.67610421-04:00
+  who: tedks
+  what: created
+  comment: ""
+- time: 2026-07-17T01:56:58.67610421-04:00
+  who: tedks
+  what: imported from beads
+  comment: priority=3; updated_at=2026-07-17T03:15:45.529270241-04:00
+- time: 2026-07-17T03:15:45.529270241-04:00
+  who: tedks
+  what: 'closed: fixed'
+  comment: 'Deleted the first-percentage-anywhere fallback in ClaudeScraper.JS_EXTRACT;
+    Claude values now come only from label-anchored modal text (Current session /
+    Weekly limits). Fixed in PR #11.'
