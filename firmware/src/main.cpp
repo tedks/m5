@@ -368,12 +368,15 @@ void loop() {
     M5.update();
 
     // Button A (front). When asleep, wake immediately on press so a long hold in
-    // the dark lights up at once instead of staying black until release; that
-    // waking press is then consumed so its release neither pages nor toggles.
-    // When awake, action happens on release: short press = next page, long press
-    // (>=800ms) = sleep. The 800ms threshold is comfortably above an intentional
-    // tap yet short enough to feel deliberate as a "hold to sleep" gesture.
-    static bool consumeRelease = false;  // swallow the release of a wake press
+    // the dark lights up at once instead of staying black until release. When
+    // awake, holding to the 800ms threshold sleeps the screen AT the threshold,
+    // while still held — sleeping only on release reads as "the button is broken"
+    // to someone holding and waiting for the screen to go dark (user-reported).
+    // A press that already acted (wake or sleep) is consumed so its release
+    // neither pages nor re-toggles; a short press acts on release: next page.
+    // 800ms is comfortably above an intentional tap yet short enough to feel
+    // deliberate as a "hold to sleep" gesture.
+    static bool consumeRelease = false;  // swallow the release of a press that already acted
     if (M5.BtnA.wasPressed() && !screenOn) {
         screenOn = true;
         M5.Axp.ScreenBreath(brightness);
@@ -381,14 +384,21 @@ void loop() {
         consumeRelease = true;
     }
 
+    // Sleep at the hold threshold while the button is still down. Guarded by
+    // consumeRelease so the press that just woke the screen can't also sleep it,
+    // and by screenOn so this fires once (pressedFor stays true for the rest of
+    // the hold, but the screen is already off by then).
+    if (screenOn && !consumeRelease && M5.BtnA.pressedFor(800)) {
+        screenOn = false;
+        M5.Axp.ScreenBreath(0);
+        consumeRelease = true;
+    }
+
+    // wasReleasefor must be evaluated before wasReleased each loop: it sets the
+    // button's internal _hold_time as a side effect, which wasReleased compares
+    // against. Both long and short releases only matter here when un-consumed.
     if (M5.BtnA.wasReleasefor(800)) {
-        if (consumeRelease) {
-            consumeRelease = false;  // wake hold released; nothing further
-        } else {
-            // Long press while awake: sleep.
-            screenOn = false;
-            M5.Axp.ScreenBreath(0);
-        }
+        consumeRelease = false;  // release of a press that acted at wake or at the threshold
     } else if (M5.BtnA.wasReleased()) {
         if (consumeRelease) {
             consumeRelease = false;  // wake tap released; nothing further
