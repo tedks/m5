@@ -22,3 +22,10 @@ log_events:
   who: tedks
   what: imported from beads
   comment: priority=2; updated_at=2026-07-17T04:37:56.44579963-04:00
+- time: 2026-08-13T15:05:12-00:00
+  who: Ted Smith
+  what: commented
+  comment: "Firmware half merged (PR #16, hands-on verified). Remaining: companion
+    per-model scraping (label-anchored, short names per the MTU ceiling on gh-12)
+    + BLE payload extension. Firmware pages render generically \u2014 companion work
+    is the only blocker for the second screen."
