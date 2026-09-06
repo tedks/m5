@@ -6,6 +6,10 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # Re-run on demand. Without this the only way to retry a run that failed for
+  # reasons outside the build -- a runner that was never scheduled, say -- is to
+  # push a commit that changes nothing.
+  workflow_dispatch:
 
 permissions:
   contents: write
