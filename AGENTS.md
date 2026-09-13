@@ -37,7 +37,7 @@ companion/                 Android project (Gradle/Kotlin, Jetpack Compose)
   app/build/outputs/apk/debug/app-debug.apk   built phone APK
 
 flake.nix                  Nix dev shell: JDK17, Gradle, Android SDK, PlatformIO, esptool, android-tools
-.github/workflows/         CI: builds APK on push to main (updates `latest` prerelease) and on v* tags
+.github/workflows/         Release: builds APK + firmware on push to main (updates `latest` prerelease) and on v* tags
 ```
 
 Issue tracking (`ditz`) lives on the `ditz-metadata` git branch, not as files in
