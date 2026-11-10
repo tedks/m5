@@ -1,0 +1,14 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+sh_test(
+    name = "ble_wire_contract_test",
+    srcs = ["tools/bazel-ble-wire-test.sh"],
+    data = [
+        "companion/app/src/main/java/com/quotawatch/api/QuotaData.kt",
+        "companion/app/src/main/java/com/quotawatch/ble/BleClient.kt",
+        "firmware/src/main.cpp",
+        "tools/ble_wire_contract.py",
+    ],
+    size = "small",
+    visibility = ["//visibility:public"],
+)

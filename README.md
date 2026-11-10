@@ -83,6 +83,10 @@ Auto-refresh runs every 5 minutes. Toggle it with the **Auto** chip.
 
 ## Building from source
 
+### Offline BLE source contract
+
+On Linux, `nix develop .#buildinfra --command bazel test //:ble_wire_contract_test` checks that the firmware and Android companion still agree on the BLE UUIDs, row field order, and newline delimiter. The lightweight Nix shell pins Bazel and Python without entering the Android/PlatformIO shell. This is a source-level interface check; compiling the APK and firmware and using adb or flashing remain separate operator operations.
+
 ### Prerequisites
 
 If you use Nix:

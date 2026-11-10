@@ -1,6 +1,7 @@
 .direnv/
 .venv/
 result
+/bazel-*
 .pio/
 .platformio/
 M5Nemo-*.bin

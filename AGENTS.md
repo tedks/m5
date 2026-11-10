@@ -48,6 +48,11 @@ this tree — see "ditz (issue tracking)" below.
 up to 6 quotas; a compact layout (font 1, 8px bars) kicks in above 3.
 
 This is a **Nix project** — always run tooling through `nix develop --command <cmd>`.
+The portable BLE source contract uses the separate `buildinfra` shell:
+`nix develop .#buildinfra --command bazel test //:ble_wire_contract_test`.
+It checks firmware/phone interface text only. Firmware compilation, APK builds,
+flashing and adb remain explicit operator workflows below; no Bazel target
+invokes them.
 
 ## Hardware / machine map
 

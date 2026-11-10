@@ -36,6 +36,10 @@
           androidSdk = androidComposition.androidsdk;
         in
         {
+          buildinfra = pkgs.mkShell {
+            packages = [ pkgs.bazel_7 pkgs.python312 ];
+          };
+
           default = pkgs.mkShell {
             packages = [
               python
