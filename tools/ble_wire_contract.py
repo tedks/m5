@@ -57,5 +57,13 @@ for call in ("createService(SERVICE_UUID)", "addServiceUUID(SERVICE_UUID)",
              "getService(SERVICE_UUID)", "getCharacteristic(QUOTA_CHAR_UUID)"):
     source = firmware if call.startswith(("create", "add")) else client
     check(call in source, f"BLE ID use changed: {call}")
+check(
+    re.search(r'createCharacteristic\(\s*QUOTA_CHAR_UUID\s*,', firmware) is not None,
+    "firmware characteristic use changed",
+)
+check(
+    "setServiceUuid(ParcelUuid(SERVICE_UUID))" in client,
+    "Android scan service use changed",
+)
 
 print("BLE UUIDs, row fields, and line delimiter agree across firmware and phone")
