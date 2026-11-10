@@ -53,6 +53,10 @@ firmware_lines = one(
     "firmware line tokenizer",
 )
 check(firmware_lines == r"\n", "firmware line delimiter changed")
+
+
+# The current BLE sources have no quoted // on checked call lines. If that
+# changes, use a source lexer; this small stripper may then fail closed.
 def without_comments(source: str) -> str:
     return re.sub(r'/\*[\s\S]*?\*/|//[^\n]*', '', source)
 
