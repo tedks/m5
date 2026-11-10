@@ -53,16 +53,22 @@ firmware_lines = one(
     "firmware line tokenizer",
 )
 check(firmware_lines == r"\n", "firmware line delimiter changed")
+def without_comments(source: str) -> str:
+    return re.sub(r'/\*[\s\S]*?\*/|//[^\n]*', '', source)
+
+
+active_firmware = without_comments(firmware)
+active_client = without_comments(client)
 for call in ("createService(SERVICE_UUID)", "addServiceUUID(SERVICE_UUID)",
              "getService(SERVICE_UUID)", "getCharacteristic(QUOTA_CHAR_UUID)"):
-    source = firmware if call.startswith(("create", "add")) else client
+    source = active_firmware if call.startswith(("create", "add")) else active_client
     check(call in source, f"BLE ID use changed: {call}")
 check(
-    re.search(r'createCharacteristic\(\s*QUOTA_CHAR_UUID\s*,', firmware) is not None,
+    re.search(r'createCharacteristic\(\s*QUOTA_CHAR_UUID\s*,', active_firmware) is not None,
     "firmware characteristic use changed",
 )
 check(
-    "setServiceUuid(ParcelUuid(SERVICE_UUID))" in client,
+    "setServiceUuid(ParcelUuid(SERVICE_UUID))" in active_client,
     "Android scan service use changed",
 )
 
