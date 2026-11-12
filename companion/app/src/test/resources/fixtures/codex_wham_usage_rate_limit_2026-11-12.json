@@ -1,0 +1,11 @@
+{
+  "allowed": true,
+  "limit_reached": false,
+  "primary_window": {
+    "used_percent": 15,
+    "limit_window_seconds": 604800,
+    "reset_after_seconds": 518220,
+    "reset_at": 1795034407
+  },
+  "secondary_window": null
+}
