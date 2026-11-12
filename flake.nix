@@ -60,6 +60,19 @@
             JAVA_HOME = "${pkgs.jdk17}";
 
             shellHook = ''
+              # adb vendor keys: when the project layout keeps a secrets/adb
+              # directory next to the bare repo (never committed), point adb at
+              # it so the phone sees a key it already trusts. Silent no-op
+              # outside a git repo, without git, without that directory, or
+              # when the caller already set ADB_VENDOR_KEYS.
+              if [ -z "''${ADB_VENDOR_KEYS:-}" ] && command -v git >/dev/null 2>&1; then
+                _qw_common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+                if [ -n "$_qw_common" ] && [ -d "$(dirname "$_qw_common")/secrets/adb" ]; then
+                  export ADB_VENDOR_KEYS="$(dirname "$_qw_common")/secrets/adb"
+                fi
+                unset _qw_common
+              fi
+
               # PlatformIO venv
               if [ ! -d .venv ]; then
                 echo "Creating virtualenv for PlatformIO..."
