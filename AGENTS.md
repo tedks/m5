@@ -29,7 +29,7 @@ Run every command below from a worktree (e.g. `master/`), never from the root.
 ├── create-worktree    helper: ./create-worktree <branch> makes m5-<branch>/ here
 ├── master/            primary worktree, branch main
 ├── m5-<branch>/       one worktree per feature branch (beside master/)
-├── secrets/           NOT a worktree, never committed:
+├── secrets/           NOT a worktree; private, git-ignored (`/secrets/`):
 │                        secrets/adb/   adb vendor keys (see the adb section)
 │                        secrets/tokens
 ├── org/               local coordination records, not committed
@@ -38,7 +38,9 @@ Run every command below from a worktree (e.g. `master/`), never from the root.
 
 `core.bare` lives in `.git/config.worktree` because ditz enables
 `extensions.worktreeConfig`. A plain `git clone` of the public repo has none of
-this; there the tree below is the clone root.
+this; there the tree below is the clone root, and a `secrets/` directory there
+would sit inside the work tree (still git-ignored). tower0's `~/Projects/m5`
+is such a plain, stale checkout, not this layout.
 
 ### Inside each worktree
 
@@ -87,18 +89,19 @@ The goal is to depend on framework0 only. Current state of each device:
 | Android phone (adb, serial `59171FDCG000Y1`) | **framework0** (the dev machine) | Yes. |
 | M5StickC Plus (`/dev/ttyUSB0`) | **framework0** | **No.** It does not enumerate there yet (kernel USB error -110, see m5-7mt), and the framework0 user is not yet in the `dialout` group. |
 
-Until m5-7mt is resolved, the last known-good way to flash is via **tower0**
-(next section). Do not assume flashing from framework0 works; check
-`ls /dev/ttyUSB0` and `id` first.
+**Flashing is currently blocked** pending m5-7mt (and `dialout` membership).
+The M5 is no longer attached to tower0. Moving the device to another machine is
+the owner's decision: ask before proposing it. Check `ls /dev/ttyUSB0` and `id`
+before assuming anything works.
 
 ## Flashing the M5 firmware
 
-### Last known-good path: via tower0
+### Historical recipe (previously worked via tower0)
 
-This is the only flashing path verified to work. It needs the M5 plugged into
-**tower0**. Build locally, copy the three binaries to tower0, and flash them
-with esptool over SSH. (Local flashing from framework0 is the intended setup but
-is blocked, see the machine map above.)
+Flashing is blocked right now (see the machine map). This is the recipe that
+worked when the M5 was plugged into **tower0**, kept for reference; it needs the
+device on tower0 again, which is the owner's call. Build locally, copy the three
+binaries to tower0, and flash them with esptool over SSH.
 
 **CRITICAL: flash all three binaries at their correct offsets. NEVER flash
 `firmware.bin` alone at `0x0` — that overwrites the bootloader and bricks boot.**
@@ -138,14 +141,17 @@ the Nix dev shell (`android-tools`), so run it through `nix develop` from a
 worktree.
 
 **adb keys.** What is verified: the phone is authorized for the dev user's own
-adb key, `~/.android/adbkey` (fingerprint
-`7A:22:2E:2D:72:DE:94:0C:53:72:72:B8:3C:C9:B8:DA`, approved by the owner on
-2026-11-12). With the normal `HOME`, adb presents that key and the phone shows
-no prompt. `secrets/adb/` (project root, outside every worktree, never
-committed) holds a key copied from tower0; the dev shell additionally offers it
-through `ADB_VENDOR_KEYS` when the directory exists (it does not override a
-value you already set, and it is a silent no-op in a plain clone). Whether the
-phone trusts the tower0 key is unproven. Check the variable with
+adb key, `~/.android/adbkey` (approved by the owner on 2026-11-12). With the
+normal `HOME`, adb presents that key and the phone shows no prompt.
+`secrets/adb/` (project root; private and git-ignored) holds a key copied from
+tower0. The dev shell offers that directory through `ADB_VENDOR_KEYS` once it
+exists (nothing happens until then): it does not override a variable you already
+set (even to empty), skips paths containing `:`, and in a plain clone resolves
+to `<clone>/secrets/adb`, inside the tree. Whether the phone trusts the tower0
+key is unproven. adb reads the variable only when its server starts, so an
+already-running server is unaffected and echoing the variable shows the
+environment, not what the server loaded; from a directory, adb loads only files
+ending in `.adb_key`. Check the variable with
 `nix develop --command bash -c 'echo $ADB_VENDOR_KEYS'`. Never read or print
 key files.
 
