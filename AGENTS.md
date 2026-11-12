@@ -125,7 +125,8 @@ Offsets: bootloader `0x1000`, partition table `0x8000`, app `0x10000`.
 
 **Alternative (full build + flash on tower0).** tower0 has a synced checkout at
 `~/Projects/m5` with the Nix flake. If it's up to date, `pio -t upload` flashes
-all three binaries at the right offsets for you:
+all three binaries at the right offsets for you. **Untested** with the
+nix-packaged PlatformIO (it was written when PlatformIO was pip-installed):
 
 ```bash
 scp firmware/src/main.cpp tower0.local:~/Projects/m5/firmware/src/main.cpp
