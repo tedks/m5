@@ -5,10 +5,13 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Message
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -161,10 +164,54 @@ fun QuotaWatchApp(vm: QuotaViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private const val LOGIN_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+/**
+ * Shared setup for the login WebView and any popup window it opens. Popups need the same
+ * settings as their opener: Google's sign-in popup runs its own scripts and storage, and the
+ * session cookies it sets have to be accepted (including third-party ones) and flushed.
+ */
 @SuppressLint("SetJavaScriptEnabled")
+private fun WebView.configureForLogin() {
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = true
+    settings.databaseEnabled = true
+    settings.userAgentString = LOGIN_UA
+    // "Continue with Google" on claude.ai uses Google Identity Services in popup mode: it calls
+    // window.open, and Google's final page (accounts.google.com/gsi/transform) hands the
+    // credential back to window.opener with postMessage and then calls window.close(). Without
+    // multi-window support WebView loads the popup INTO this WebView, which destroys the opener,
+    // so that hand-off has nowhere to go and the screen stays white. With it enabled, window.open
+    // goes to WebChromeClient.onCreateWindow (see LoginWebViewScreen).
+    settings.setSupportMultipleWindows(true)
+    settings.javaScriptCanOpenWindowsAutomatically = true
+    CookieManager.getInstance().setAcceptCookie(true)
+    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+    webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView, finishedUrl: String) {
+            // Flush cookies to persistent storage
+            CookieManager.getInstance().flush()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginWebViewScreen(url: String, onDone: () -> Unit) {
+    // At most one popup at a time (the sign-in window). It is drawn over the main WebView, which
+    // stays alive underneath so the popup's window.opener still points at the login page.
+    var popup by remember { mutableStateOf<WebView?>(null) }
+
+    // Only drops the popup from composition; its AndroidView's onRelease destroys the WebView
+    // once it has been detached, so a WebView is never destroyed while still attached.
+    fun closePopup(child: WebView) {
+        if (popup === child) popup = null
+    }
+
+    // Back closes the popup (as a browser tab would) rather than leaving the login screen.
+    BackHandler(enabled = popup != null) { popup?.let { closePopup(it) } }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -177,28 +224,50 @@ fun LoginWebViewScreen(url: String, onDone: () -> Unit) {
             )
         }
     ) { padding ->
-        AndroidView(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            factory = { context ->
-                WebView(context).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.databaseEnabled = true
-                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
-                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
-                    CookieManager.getInstance().setAcceptCookie(true)
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView, finishedUrl: String) {
-                            // Flush cookies to persistent storage
-                            CookieManager.getInstance().flush()
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    WebView(context).apply {
+                        configureForLogin()
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onCreateWindow(
+                                view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message
+                            ): Boolean {
+                                // Refuse a second concurrent popup; the page's window.open
+                                // returns null, the same as a blocked popup in a browser.
+                                if (popup != null) return false
+                                val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                                val child = WebView(view.context).apply {
+                                    configureForLogin()
+                                    webChromeClient = object : WebChromeClient() {
+                                        override fun onCloseWindow(window: WebView) = closePopup(window)
+                                    }
+                                }
+                                popup = child
+                                transport.webView = child
+                                resultMsg.sendToTarget()
+                                return true
+                            }
                         }
+                        loadUrl(url)
                     }
-                    loadUrl(url)
+                },
+                onRelease = { it.destroy() }
+            )
+            popup?.let { child ->
+                // key() so a different popup instance gets a fresh AndroidView rather than the
+                // old view being reused around a destroyed WebView.
+                key(child) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { child },
+                        // Runs on close, Back, or leaving the login screen (Done) with it open.
+                        onRelease = { it.destroy() }
+                    )
                 }
             }
-        )
+        }
     }
 }
 
