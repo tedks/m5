@@ -1,0 +1,20 @@
+id: m5-env
+title: 'Dev-env refresh: bare/worktree layout docs, project adb key dir, local flashing
+  docs'
+desc: 'Docs and dev shell for the 2026-11-12 refresh: repo is now bare + master/ worktree;
+  adb key dir lives at <project-root>/secrets/adb (non-worktree); AGENTS.md hardware
+  map and flashing instructions move from tower0 to framework0 once m5-7mt is resolved.
+  Verify firmware build and BLE wire contract test from a fresh worktree.'
+type: task
+component: default
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T20:36:50-00:00
+references: []
+log_events:
+- time: 2026-11-12T20:36:50-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
