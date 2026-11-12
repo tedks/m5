@@ -58,17 +58,22 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         // label within a bounded gap; there is no "first percentage anywhere" fallback, which
         // once reported sidebar junk as quota (bd m5-39u/m5-iia).
         private val NUM = """(\d+(?:\.\d+)?)\s*%\s*used"""
+        // A bounded gap between a label and its value that may not cross a '%' or another
+        // quota's label. Without this, a row whose value has not rendered (or is shown in another
+        // form) would borrow the next row's "N% used" under its own name.
+        private fun gap(max: Int) =
+            """(?:(?!%|current session|this week|weekly limits|all models|of your weekly limit)[\s\S]){0,$max}?"""
         // July 2026 layout: "Current session · Resets in N hr · 7% used".
-        private val DOM_SESSION = Regex("""current session[\s\S]{0,160}?$NUM""", RegexOption.IGNORE_CASE)
+        private val DOM_SESSION = Regex("""current session${gap(160)}$NUM""", RegexOption.IGNORE_CASE)
         // July 2026 layout: "Weekly limits / All models · Resets ... · 15% used".
-        private val DOM_WEEKLY_OLD = Regex("""weekly limits[\s\S]{0,40}?all models[\s\S]{0,160}?$NUM""", RegexOption.IGNORE_CASE)
+        private val DOM_WEEKLY_OLD = Regex("""weekly limits${gap(40)}all models${gap(160)}$NUM""", RegexOption.IGNORE_CASE)
         // November 2026 layout: a line that is exactly "This week", then "Resets ...", then
         // "60% used". ("This week's usage by product" further down is not that line.)
-        private val DOM_WEEKLY = Regex("""(?:^|\n)[ \t]*this week[ \t]*\n[\s\S]{0,120}?$NUM""", RegexOption.IGNORE_CASE)
+        private val DOM_WEEKLY = Regex("""(?:^|\n)[ \t]*this week[ \t]*\n${gap(120)}$NUM""", RegexOption.IGNORE_CASE)
         // November 2026 per-model row: "<model>" line, "Up to N% of your weekly limit" line,
-        // up to two more lines (the reset, an icon glyph), then "M% used".
+        // up to two more lines without a '%' (the reset, an icon glyph), then "M% used".
         private val DOM_MODEL = Regex(
-            """(?:^|\n)([^\n]{1,40})\n[ \t]*up to \d+(?:\.\d+)?\s*% of your weekly limit[ \t]*\n(?:[^\n]{0,80}\n){0,2}[ \t]*$NUM""",
+            """(?:^|\n)([^\n]{1,40})\n[ \t]*up to \d+(?:\.\d+)?\s*% of your weekly limit[ \t]*\n(?:[^\n%]{0,80}\n){0,2}[ \t]*$NUM""",
             RegexOption.IGNORE_CASE
         )
 

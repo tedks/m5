@@ -209,4 +209,50 @@ class ClaudeParseUsageTest {
             .put("scope", JSONObject().put("model", JSONObject().put("display_name", "Opus"))))
         assertEquals(12f, byName(ClaudeScraper.parse(claudeInput("", api = api)).results, "Opus wk")!!.quota.used, 0.001f)
     }
+
+    // ------------------------------------------------ DOM values never bleed across rows
+    // Same class as the Codex council finding (PR #27, round 01bb15178930): a label whose value
+    // has not rendered must not borrow the next row's "N% used".
+
+    private fun dom(text: String) = ClaudeScraper.parse(claudeInput(text)).results
+
+    @Test
+    fun `claude weekly row without a value does not borrow the model row value`() {
+        val r = dom("Your usage\nThis week\nResets Saturday 11:00 AM\nFable\nUp to 50% of your weekly limit\nResets Saturday 11:00 AM\n69% used\n")
+        // Mutation-checked: gap() back to [\s\S]{0,N}? -> red (Claude wk would read 69).
+        assertNull(byName(r, "Claude wk"))
+        // Twin: the model row keeps its own value.
+        assertEquals(69f, byName(r, "Fable wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude session row without a value does not borrow the weekly value`() {
+        val r = dom("Plan usage limits\nCurrent session\nResets in 3 hr\nWeekly limits\nAll models\nResets Sat\n15% used\n")
+        // Mutation-checked: gap() back to [\s\S]{0,N}? -> red (Claude 5h would read 15).
+        assertNull(byName(r, "Claude 5h"))
+        assertEquals(15f, byName(r, "Claude wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude model row without a value does not borrow the next model row value`() {
+        val r = dom("Your usage\nThis week\nResets Sat\n5% used\nFable\nUp to 50% of your weekly limit\nSpark\nUp to 30% of your weekly limit\nResets Sat\n12% used\n")
+        assertNull(byName(r, "Fable wk"))
+        // Twin: the row that has a value is read, under its own name.
+        assertEquals(12f, byName(r, "Spark wk")!!.quota.used, 0.001f)
+        assertEquals(5f, byName(r, "Claude wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude rows never read past another percentage`() {
+        // An unlisted line carrying its own percentage sits between a label and a later "% used".
+        val wk = dom("Your usage\nThis week\nResets Sat\nExtra 30% of credits\n20% used\n")
+        // Mutation-checked: '%' dropped from gap()'s exclusions -> red.
+        assertNull(byName(wk, "Claude wk"))
+        val model = dom("Your usage\nFable\nUp to 50% of your weekly limit\nExtra 30% of credits\n20% used\n")
+        // Mutation-checked: '%' dropped from the model row's intermediate lines -> red.
+        assertNull(byName(model, "Fable wk"))
+        // Twin: without the intervening percentage both rows are read.
+        assertEquals(20f, byName(dom("Your usage\nThis week\nResets Sat\n20% used\n"), "Claude wk")!!.quota.used, 0.001f)
+        assertEquals(20f, byName(dom("Your usage\nFable\nUp to 50% of your weekly limit\nResets Sat\n20% used\n"), "Fable wk")!!.quota.used, 0.001f)
+    }
 }
