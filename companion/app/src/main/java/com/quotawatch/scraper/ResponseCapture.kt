@@ -22,6 +22,8 @@ package com.quotawatch.scraper
  *   been kept is dropped, so overlapping requests cannot leave stale numbers behind.
  * - A key that matched more than one distinct path keeps no body (`ambiguous`), so the
  *   scrapers fall back to the rendered text rather than guess which response the page shows.
+ * - The wrapped `window.fetch` is a plain function, so `fetch.toString()` no longer reports
+ *   `[native code]`. A page that checks for that could behave differently; none observed.
  * - Raw bodies stay in page memory. They contain account identifiers, so the poll JS must
  *   return only numeric fields and fixed labels — never a raw body — because the poll result
  *   is logged.
@@ -126,5 +128,6 @@ object ResponseCapture {
 
     /** Single-quoted JS string literal for a trusted constant (escapes backslash and quote). */
     internal fun jsString(s: String): String =
-        "'" + s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
+        "'" + s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029") + "'"
 }

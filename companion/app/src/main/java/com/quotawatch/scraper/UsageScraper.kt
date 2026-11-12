@@ -174,9 +174,14 @@ class UsageScraper(private val contextProvider: () -> Context) {
 
             Log.d(TAG, "Scraping $url (attempt ${retryCount + 1})")
 
+            // Origin rule for the capture script, checked before any WebView exists so a bad URL
+            // fails without leaking one. Both scrape URLs are https constants.
+            val captureOrigin = if (captureScript == null) null else Uri.parse(url).let { u ->
+                require(u.scheme == "https" && !u.host.isNullOrEmpty()) { "capture needs an https URL: $url" }
+                "https://${u.host}" + (if (u.port != -1) ":${u.port}" else "")
+            }
             val webContext = getActivityContext()
             val webView = WebView(webContext).apply {
-                layoutParams = ViewGroup.LayoutParams(1, 1)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
@@ -188,7 +193,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                 // Keep the renderer at IMPORTANT priority even with nothing visible. This WebView
-                // is 1x1 and off-screen, and background scrapes run with no foreground UI at all;
+                // is never attached to a window, and background scrapes run with no foreground UI at all;
                 // without this the OS deprioritizes/pauses the renderer, so the SPA never finishes
                 // rendering and the scrape hits the 45s timeout. waivedWhenNotVisible=false keeps
                 // the priority pinned regardless of visibility.
@@ -198,6 +203,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 val density = webContext.resources.displayMetrics.density
                 val w = (VIEWPORT_WIDTH_DP * density).toInt()
                 val h = (VIEWPORT_HEIGHT_DP * density).toInt()
+                layoutParams = ViewGroup.LayoutParams(w, h)
                 measure(
                     View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
@@ -206,9 +212,8 @@ class UsageScraper(private val contextProvider: () -> Context) {
             }
 
             if (captureScript != null) {
-                val origin = Uri.parse(url).let { "${it.scheme}://${it.host}" }
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                    WebViewCompat.addDocumentStartJavaScript(webView, captureScript, setOf(origin))
+                    WebViewCompat.addDocumentStartJavaScript(webView, captureScript, setOf(captureOrigin!!))
                 } else {
                     // Structured capture unavailable on this WebView: the scrapers fall back to
                     // their label-anchored DOM extraction.
