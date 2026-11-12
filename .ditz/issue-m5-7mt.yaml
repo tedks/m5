@@ -33,3 +33,13 @@ log_events:
   who: Ted Smith
   what: started
   comment: ""
+- time: 2026-11-12T21:38:48-00:00
+  who: Ted Smith
+  what: commented
+  comment: '2026-11-12: A fresh USB-A replug still failed during descriptor reads
+    with error -110; the kernel power-cycled the port and ended unable to enumerate.
+    No serial device appeared. Group membership is present in the account database,
+    but permissions are downstream of enumeration and cannot explain this failure.
+    Next discriminator: a data-capable USB-C cable on a direct port; if that also
+    fails, step back to an independent cable/device control rather than repeating
+    port variants.'
