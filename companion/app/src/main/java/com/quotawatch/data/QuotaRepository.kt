@@ -200,8 +200,12 @@ class QuotaRepository(private val app: Application) {
             val snapshot = fresh.mergedWith(_quotas.value, System.currentTimeMillis())
             _quotas.value = snapshot
 
+            val payload = snapshot.toBlePayload()
+            // Quota names and numbers only (no account data). The firmware reads one GATT write
+            // into a 512-byte buffer, so the length is worth seeing.
+            Log.d(TAG, "BLE payload (${payload.size} bytes): ${String(payload, Charsets.UTF_8).replace("\n", "\\n")}")
             if (bleClient.state.value is BleClient.State.Connected) {
-                bleClient.sendQuotaData(snapshot.toBlePayload())
+                bleClient.sendQuotaData(payload)
             }
 
             wearSync.syncQuotas(snapshot)

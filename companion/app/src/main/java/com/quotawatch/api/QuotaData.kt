@@ -17,7 +17,9 @@ sealed class QuotaResult {
     data class Success(
         override val service: String,
         val quota: Quota,
-        val fetchedAt: Long = System.currentTimeMillis()
+        val fetchedAt: Long = System.currentTimeMillis(),
+        /** Where the number came from, for logs: "api" (the page's own JSON) or "dom". */
+        val source: String? = null
     ) : QuotaResult()
 
     data class Error(override val service: String, val message: String) : QuotaResult()

@@ -7,6 +7,8 @@ import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.net.Uri
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
@@ -14,6 +16,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,6 +37,13 @@ class UsageScraper(private val contextProvider: () -> Context) {
         const val POLL_INTERVAL_MS = 500L
         const val TIMEOUT_MS = 45000L
         const val MAX_RETRIES = 1
+        // Layout size for the off-screen WebView, in dp (a typical phone portrait viewport).
+        // The WebView is never attached to a window, so without an explicit layout it has a
+        // ~0-size viewport. Since the 2026 claude.ai redesign the usage panel does not render at
+        // all at that size (observed 2026-11-12: /new#settings/usage, no dialog, no usage
+        // request), while a full-size WebView on the same page renders it.
+        const val VIEWPORT_WIDTH_DP = 412
+        const val VIEWPORT_HEIGHT_DP = 915
         const val CHROME_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
@@ -153,6 +164,8 @@ class UsageScraper(private val contextProvider: () -> Context) {
         // optional field shows up (see PollDecision/decidePoll). 0 (the default) preserves the
         // original finalize-immediately-on-settle behavior.
         graceExtraPolls: Int = 0,
+        // Optional document-start script (see ResponseCapture), installed for [url]'s origin only.
+        captureScript: String? = null,
         retryCount: Int = 0
     ): ScrapeResult =
         withContext(Dispatchers.Main) {
@@ -180,6 +193,27 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 // rendering and the scrape hits the 45s timeout. waivedWhenNotVisible=false keeps
                 // the priority pinned regardless of visibility.
                 setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+
+                // Give the detached WebView a real phone-sized viewport (see VIEWPORT_WIDTH_DP).
+                val density = webContext.resources.displayMetrics.density
+                val w = (VIEWPORT_WIDTH_DP * density).toInt()
+                val h = (VIEWPORT_HEIGHT_DP * density).toInt()
+                measure(
+                    View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+                )
+                layout(0, 0, w, h)
+            }
+
+            if (captureScript != null) {
+                val origin = Uri.parse(url).let { "${it.scheme}://${it.host}" }
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, captureScript, setOf(origin))
+                } else {
+                    // Structured capture unavailable on this WebView: the scrapers fall back to
+                    // their label-anchored DOM extraction.
+                    Log.w(TAG, "DOCUMENT_START_SCRIPT unsupported; structured capture disabled")
+                }
             }
 
             var pendingPoll: Runnable? = null
@@ -217,7 +251,9 @@ class UsageScraper(private val contextProvider: () -> Context) {
                 view.evaluateJavascript(js) { jsResult ->
                     if (isTornDown || result.isCompleted) return@evaluateJavascript
                     val decoded = decodeJsResult(jsResult)
-                    Log.d(TAG, "Poll result: ${decoded?.take(200)}")
+                    // Length only: the payload carries page text, which can include account
+                    // details, so its content is never logged.
+                    Log.d(TAG, "Poll result: ${decoded?.length ?: "null"} chars")
                     when (val decision = decidePoll(decoded, pollState, ::safeIsSettled, graceExtraPolls)) {
                         is PollDecision.Finalize -> result.complete(ScrapeResult(decision.value))
                         is PollDecision.Continue -> {
@@ -292,7 +328,7 @@ class UsageScraper(private val contextProvider: () -> Context) {
             // Retry on transient failure (not session expiry)
             if (scraped.data == null && !scraped.sessionExpired && retryCount < MAX_RETRIES) {
                 Log.d(TAG, "Retrying $url...")
-                return@withContext scrape(url, js, isSettled, graceExtraPolls, retryCount + 1)
+                return@withContext scrape(url, js, isSettled, graceExtraPolls, captureScript, retryCount + 1)
             }
 
             scraped
