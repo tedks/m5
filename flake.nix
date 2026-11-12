@@ -60,6 +60,26 @@
             JAVA_HOME = "${pkgs.jdk17}";
 
             shellHook = ''
+              # adb vendor keys: when the project keeps a secrets/adb directory
+              # (next to the bare repo, or at the clone root in a plain clone;
+              # git-ignored either way), offer it to adb via ADB_VENDOR_KEYS.
+              # adb reads the variable only when its server starts, and from a
+              # directory loads only files ending in .adb_key. Silent no-op
+              # outside a git repo, without git, without that directory, when
+              # the variable is already set (even to empty), or when the path
+              # contains ':' (adb splits the variable on colons).
+              if [ "''${ADB_VENDOR_KEYS+set}" != set ] && command -v git >/dev/null 2>&1; then
+                _qw_common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+                if [ -n "$_qw_common" ]; then
+                  _qw_keys="$(dirname "$_qw_common")/secrets/adb"
+                  case "$_qw_keys" in
+                    *:*) ;;
+                    *) if [ -d "$_qw_keys" ]; then export ADB_VENDOR_KEYS="$_qw_keys"; fi ;;
+                  esac
+                fi
+                unset _qw_common _qw_keys
+              fi
+
               # PlatformIO venv
               if [ ! -d .venv ]; then
                 echo "Creating virtualenv for PlatformIO..."
