@@ -22,6 +22,9 @@ package com.quotawatch.scraper
  *   been kept is dropped, so overlapping requests cannot leave stale numbers behind.
  * - A key that matched more than one distinct path keeps no body (`ambiguous`), so the
  *   scrapers fall back to the rendered text rather than guess which response the page shows.
+ *   Paths are noted when a request starts, but a second path the page requests only AFTER the
+ *   scrape has settled on the first cannot be seen; that window is accepted (no page has been
+ *   observed to load more than one organization's usage).
  * - The wrapped `window.fetch` is a plain function, so `fetch.toString()` no longer reports
  *   `[native code]`. A page that checks for that could behave differently; none observed.
  * - Raw bodies stay in page memory. They contain account identifiers, so the poll JS must
@@ -76,7 +79,8 @@ object ResponseCapture {
                     return true;
                 }
                 function keep(key, n, finalUrl, body) {
-                    if (keyFor(finalUrl || '') !== key) return;
+                    if (!finalUrl) return;
+                    if (keyFor(finalUrl) !== key) return;
                     if (!body || typeof body !== 'object') return;
                     if (!note(key, finalUrl)) return;
                     var prev = cap[key];
