@@ -1,0 +1,25 @@
+id: m5-loginpolish
+title: 'Login WebView polish: popup gesture gating, nested popups, Back and rotation'
+desc: 'Council nits on PR #25 (anthropic seat, round 8f673d69aa0d), not blocking:
+  (1) javaScriptCanOpenWindowsAutomatically=true and onCreateWindow ignores isUserGesture,
+  so any script on the login pages can open the overlay without a tap; GIS opens from
+  a click, so gating on isUserGesture likely suffices, but this needs an on-device
+  check of Google sign-in first. (2) The popup child has multi-window on but no onCreateWindow,
+  so window.open and _blank links inside the Google popup do nothing; harmless for
+  sign-in. (3) Rotating mid sign-in recreates the activity and drops the login screen
+  (existing behavior). (4) Back with no popup open exits the app instead of going
+  back in WebView history or returning to the main screen (existing behavior). Do
+  these after the owner''s on-device login proof of #25, so the proof isn''t invalidated.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:45:41-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:45:41-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
