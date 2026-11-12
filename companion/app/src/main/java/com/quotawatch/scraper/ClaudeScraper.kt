@@ -36,11 +36,10 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         // Disagreement (percentage points) between api and dom above which a warning is logged.
         private const val CROSS_CHECK_TOLERANCE = 1.0
 
-        // Settled once any weekly or session value is present (from either source), or the page's
-        // complete list says there is none (Unavailable); the poll loop's stable-twice check and
-        // grace window wait out the rest of the panel rendering.
-        internal fun isSettled(raw: String): Boolean = try {
-            parse(raw).results.any { it is QuotaResult.Success || it is QuotaResult.Unavailable }
+        // Settled once any weekly or session value is present (from either source); the poll
+        // loop's stable-twice check and grace window wait out the rest of the panel rendering.
+        private fun isSettled(raw: String): Boolean = try {
+            parse(raw).results.any { it is QuotaResult.Success }
         } catch (e: Exception) {
             false
         }
@@ -101,13 +100,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         /** One source's values: the aggregate rows by name, plus raw per-model (label, value). */
         internal data class Extract(
             val values: LinkedHashMap<String, Double>,
-            val models: List<Pair<String, Double>>,
-            /**
-             * The page's JSON carried its `limits` list and every entry was understood, so its row
-             * set is complete. Assumes the captured /usage response is the panel's full list
-             * (no filtered variant of the same path has been observed).
-             */
-            val complete: Boolean = false
+            val models: List<Pair<String, Double>>
         )
 
         // Label-anchored patterns over the usage panel text. Each row is line-structured: its
@@ -157,10 +150,6 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             return Extract(out, candidates)
         }
 
-        // Limit kinds this parser understands. A limits list with any other kind is not treated
-        // as complete, so a redesign that adds kinds falls back to adding rows from the text.
-        private val KNOWN_KINDS = setOf("session", "weekly_all", "weekly_scoped")
-
         /** Capture key for the page's own usage request (see ResponseCapture). */
         const val CAPTURE_KEY = "claudeUsage"
 
@@ -186,15 +175,10 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             if (api == null) return Extract(out, emptyList())
             val limits = api.optJSONArray("limits")
             val scoped = mutableListOf<Pair<String, Double>>()
-            var understood = limits != null
             if (limits != null) {
                 for (i in 0 until limits.length()) {
-                    val l = limits.optJSONObject(i)
-                    if (l == null || l.optString("kind") !in KNOWN_KINDS) { understood = false; continue }
-                    // An entry of a known kind whose value cannot be read is not understood either:
-                    // the list is then not complete, and the text may still supply that row.
-                    val v = pct(l.opt("percent"))
-                    if (v == null) { understood = false; continue }
+                    val l = limits.optJSONObject(i) ?: continue
+                    val v = pct(l.opt("percent")) ?: continue
                     when (l.optString("kind")) {
                         "session" -> if (SESSION_NAME !in out) out[SESSION_NAME] = v
                         "weekly_all" -> if (WEEKLY_NAME !in out) out[WEEKLY_NAME] = v
@@ -206,11 +190,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                             // `as? String`: Android's org.json turns a JSON null into "null"
                             // through optString, which would become a row named "null wk".
                             val name = scope?.optJSONObject("model")?.opt("display_name") as? String
-                            when {
-                                surface != null && surface != JSONObject.NULL -> {} // deliberately not a row
-                                name.isNullOrBlank() -> understood = false
-                                else -> scoped.add(name to v)
-                            }
+                            if ((surface == null || surface == JSONObject.NULL) && !name.isNullOrBlank()) scoped.add(name to v)
                         }
                         else -> {}
                     }
@@ -218,7 +198,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             }
             if (SESSION_NAME !in out) pct(api.optJSONObject("five_hour")?.opt("utilization"))?.let { out[SESSION_NAME] = it }
             if (WEEKLY_NAME !in out) pct(api.optJSONObject("seven_day")?.opt("utilization"))?.let { out[WEEKLY_NAME] = it }
-            return Extract(out, scoped, complete = understood)
+            return Extract(out, scoped)
         }
 
         /**
@@ -243,16 +223,8 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             // Aggregate rows first, then model rows; model rows are capped across both sources
             // together (in page-JSON order, then text order).
             val models = modelRows(api.models, dom.models)
-            // When the page's JSON carried its complete limits list, that list decides which rows
-            // exist; the rendered text only cross-checks it. Otherwise each source adds rows.
-            val names = LinkedHashSet<String>()
-            if (api.complete) {
-                names.addAll(api.values.keys)
-                models.filterValues { it.first != null }.keys.take(MAX_MODEL_ROWS).forEach { names.add(it) }
-            } else {
-                names.addAll(api.values.keys); names.addAll(dom.values.keys)
-                models.keys.take(MAX_MODEL_ROWS).forEach { names.add(it) }
-            }
+            val names = LinkedHashSet<String>().apply { addAll(api.values.keys); addAll(dom.values.keys) }
+            models.keys.take(MAX_MODEL_ROWS).forEach { names.add(it) }
             for (name in names) {
                 val a = api.values[name] ?: models[name]?.first
                 val d = dom.values[name] ?: models[name]?.second
@@ -260,14 +232,12 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                     warnings.add("$name: api=$a dom=$d disagree; using api")
                 }
                 val (v, src) = if (a != null) a to "api" else d!! to "dom"
-                results.add(QuotaResult.Success(SERVICE, Quota(name, v.toFloat(), 100f, "%"), source = src, completeSet = api.complete))
+                results.add(QuotaResult.Success(SERVICE, Quota(name, v.toFloat(), 100f, "%"), source = src,
+                    // A per-model row that is missing next round is gone (its model left the plan,
+                    // or its name changed), not late: it is never carried over (see mergedWith).
+                    retainable = name == SESSION_NAME || name == WEEKLY_NAME))
             }
 
-            if (results.isEmpty() && api.complete) {
-                // The page's complete list has no limits we can show: say so, and (as Unavailable)
-                // let mergedWith drop any previously shown Claude rows instead of retaining them.
-                return Parsed(listOf(QuotaResult.Unavailable(SERVICE, "No displayable usage limits")), warnings)
-            }
             if (results.isEmpty()) {
                 val msg = if (json.optBoolean("usageReady", false)) {
                     "Usage values not found on page"

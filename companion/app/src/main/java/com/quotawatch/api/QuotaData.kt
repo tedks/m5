@@ -21,11 +21,11 @@ sealed class QuotaResult {
         /** Where the number came from, for logs: "api" (the page's own JSON) or "dom". */
         val source: String? = null,
         /**
-         * True when this service's fresh rows came with the page's complete list of its quotas
-         * (e.g. Claude's `limits` array), so a quota missing from this round is gone, not late.
-         * See [mergedWith].
+         * Whether [mergedWith] may carry this quota over to a later round in which it is missing
+         * (a partial settle). False for rows whose absence means the quota is gone, e.g. Claude's
+         * per-model rows.
          */
-        val completeSet: Boolean = false
+        val retainable: Boolean = true
     ) : QuotaResult()
 
     data class Error(override val service: String, val message: String) : QuotaResult()
@@ -124,10 +124,8 @@ data class QuotaSnapshot(
  *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
  *    payload must never present deliberately-unavailable data as if it were live — showing
  *    hour-old numbers under a "logged out" service reads as current and misleads.
- *  - If any fresh Success for the service is marked [QuotaResult.Success.completeSet] (it came
- *    with the page's complete list of that service's quotas), a quota missing from that list is
- *    gone (e.g. a per-model row whose model left the plan, or a row whose name changed), so
- *    nothing is retained for that service. Retention is for partial settles, not for this.
+ *  - A previous Success with [QuotaResult.Success.retainable] false is never retained: its
+ *    absence means the quota is gone (e.g. a per-model row whose model left the plan).
  *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
  *    to [now] is dropped regardless.
  *
@@ -146,13 +144,10 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .map { it.service }
         .toSet()
 
-    // Services whose fresh rows came with the page's complete quota list.
-    val completeServices = successes.filter { it.completeSet }.map { it.service }.toSet()
-
     val retainedStale = previous.successes
         .filter { (it.service to it.quota.name) !in freshSuccessKeys }
         .filter { it.service in activeServices }
-        .filter { it.service !in completeServices }
+        .filter { it.retainable }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
     return copy(results = (results + retainedStale).sortedWith(QUOTA_RESULT_ORDER))
