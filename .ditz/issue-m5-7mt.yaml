@@ -16,7 +16,7 @@ type: task
 component: default
 release:
 reporter: tedks
-status: unstarted
+status: in_progress
 disposition:
 creation_time: 2026-05-26T19:24:35.215307132-04:00
 references: []
@@ -29,3 +29,7 @@ log_events:
   who: tedks
   what: imported from beads
   comment: priority=2; updated_at=2026-05-26T19:24:35.215307132-04:00
+- time: 2026-11-12T21:12:48-00:00
+  who: Ted Smith
+  what: started
+  comment: ""
