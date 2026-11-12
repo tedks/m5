@@ -1,0 +1,24 @@
+id: m5-hookjs
+title: Run the ResponseCapture hook's JS behavior tests in the gates
+desc: 'The document-start capture hook (ResponseCapture.hookScript) is JavaScript
+  and the JVM unit tests cannot execute it (no JS engine on the test classpath). For
+  PR #26 its behavior (same-origin only, final-URL re-check after redirects, out-of-order
+  responses dropped, XHR path, non-2xx ignored) was tested with an out-of-tree node
+  harness using fake fetch/XHR, then mutation-checked. Options: (a) add a test-only
+  JS engine (Rhino; needs Promise + a URL shim) so it runs under ./gradlew test; (b)
+  add nodejs to the dev shell (flake.nix is owned by the dev-env lane) and a Bazel/gradle
+  task that runs the harness. Recommendation: (a), test-only dependency, no flake
+  change.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:39:02-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:39:02-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
