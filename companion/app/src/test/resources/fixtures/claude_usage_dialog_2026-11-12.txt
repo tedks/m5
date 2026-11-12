@@ -42,11 +42,11 @@ Limit resets
 4 available
 Fable reset · 3
 
-All expire Mar 9, 2027, 2:59 AM EST
+All expire <date 1>
 Refills your Fable allowance and gives back what Fable used on your weekly limit. It doesn’t reset your whole week.
 Reset for free
 Weekly reset
-Expires Dec 10, 5:00 PM EST
+Expires <date 2>
 Reset for free
 Usage credits
 Available for any task. Promotional credits are used before purchased credits.

@@ -54,26 +54,54 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             return clean.take(MODEL_LABEL_MAX).trimEnd() + " wk"
         }
 
-        // Label-anchored patterns over the usage panel text. Every value must follow its own
-        // label within a bounded gap; there is no "first percentage anywhere" fallback, which
-        // once reported sidebar junk as quota (bd m5-39u/m5-iia).
+        /**
+         * Per-model rows from (page label, used percent) candidates, in page order. Fails closed
+         * on collisions: a wrist name produced by two different labels (e.g. "Claude Opus 4.5"
+         * and "Claude Opus 4.6" both truncate to "Claude Opus wk"), or equal to the aggregate
+         * rows' names, is omitted entirely, since the wrist could not say whose number it is.
+         * A label repeated verbatim keeps its first value. At most [MAX_MODEL_ROWS] rows.
+         */
+        internal fun modelRows(candidates: List<Pair<String, Double>>): LinkedHashMap<String, Double> {
+            val labelsByName = LinkedHashMap<String, MutableSet<String>>()
+            val first = LinkedHashMap<String, Double>()
+            for ((label, v) in candidates) {
+                val name = modelRowName(label) ?: continue
+                val key = label.trim().replace(Regex("\\s+"), " ")
+                labelsByName.getOrPut(name) { LinkedHashSet() }.add(key)
+                if (name !in first) first[name] = v
+            }
+            val out = LinkedHashMap<String, Double>()
+            for ((name, v) in first) {
+                if (out.size >= MAX_MODEL_ROWS) break
+                if (name == SESSION_NAME || name == WEEKLY_NAME) continue
+                if (labelsByName[name]!!.size > 1) continue
+                out[name] = v
+            }
+            return out
+        }
+
+        // Label-anchored patterns over the usage panel text. Each row is line-structured: its
+        // label line, then only "decoration" lines (a "Resets ..." line, or a line of icon glyphs
+        // with no letters or digits), then the "N% used" line. Any other line in between (another
+        // row's label, a model name, an unknown row) means no match, so a row whose value has not
+        // rendered can never borrow the next row's number. There is no "first percentage
+        // anywhere" fallback, which once reported sidebar junk as quota (bd m5-39u/m5-iia).
         private val NUM = """(\d+(?:\.\d+)?)\s*%\s*used"""
-        // A bounded gap between a label and its value that may not cross a '%' or another
-        // quota's label. Without this, a row whose value has not rendered (or is shown in another
-        // form) would borrow the next row's "N% used" under its own name.
-        private fun gap(max: Int) =
-            """(?:(?!%|current session|this week|weekly limits|all models|of your weekly limit)[\s\S]){0,$max}?"""
-        // July 2026 layout: "Current session · Resets in N hr · 7% used".
-        private val DOM_SESSION = Regex("""current session${gap(160)}$NUM""", RegexOption.IGNORE_CASE)
-        // July 2026 layout: "Weekly limits / All models · Resets ... · 15% used".
-        private val DOM_WEEKLY_OLD = Regex("""weekly limits${gap(40)}all models${gap(160)}$NUM""", RegexOption.IGNORE_CASE)
+        private const val DECOR = """(?:[ \t]*(?:resets[^\n%]{0,60}|[^\p{L}\p{N}\n%]{0,8})[ \t]*\n){0,3}"""
+        // A label line, its decoration lines and its value line; row() also anchors it to a line start.
+        private fun body(label: String) = """[ \t]*$label[ \t]*\n$DECOR[ \t]*$NUM"""
+        private fun row(label: String) = """(?:^|\n)${body(label)}"""
+        // July 2026 layout: "Current session / Resets in N hr / 7% used".
+        private val DOM_SESSION = Regex(row("current session"), RegexOption.IGNORE_CASE)
+        // July 2026 layout: "Weekly limits / All models / Resets ... / 15% used".
+        private val DOM_WEEKLY_OLD = Regex("""(?:^|\n)[ \t]*weekly limits[ \t]*\n$DECOR${body("all models")}""", RegexOption.IGNORE_CASE)
         // November 2026 layout: a line that is exactly "This week", then "Resets ...", then
         // "60% used". ("This week's usage by product" further down is not that line.)
-        private val DOM_WEEKLY = Regex("""(?:^|\n)[ \t]*this week[ \t]*\n${gap(120)}$NUM""", RegexOption.IGNORE_CASE)
+        private val DOM_WEEKLY = Regex(row("this week"), RegexOption.IGNORE_CASE)
         // November 2026 per-model row: "<model>" line, "Up to N% of your weekly limit" line,
-        // up to two more lines without a '%' (the reset, an icon glyph), then "M% used".
+        // decoration lines, then "M% used".
         private val DOM_MODEL = Regex(
-            """(?:^|\n)([^\n]{1,40})\n[ \t]*up to \d+(?:\.\d+)?\s*% of your weekly limit[ \t]*\n(?:[^\n%]{0,80}\n){0,2}[ \t]*$NUM""",
+            """(?:^|\n)([^\n]{1,40})\n[ \t]*up to \d+(?:\.\d+)?\s*% of your weekly limit[ \t]*\n$DECOR[ \t]*$NUM""",
             RegexOption.IGNORE_CASE
         )
 
@@ -90,15 +118,10 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             pctOrNull(DOM_SESSION.find(text)?.groupValues?.get(1))?.let { out[SESSION_NAME] = it }
             val weekly = DOM_WEEKLY_OLD.find(text) ?: DOM_WEEKLY.find(text)
             pctOrNull(weekly?.groupValues?.get(1))?.let { out[WEEKLY_NAME] = it }
-            var models = 0
-            for (m in DOM_MODEL.findAll(text)) {
-                if (models >= MAX_MODEL_ROWS) break
-                val name = modelRowName(m.groupValues[1]) ?: continue
-                val v = pctOrNull(m.groupValues[2]) ?: continue
-                if (name in out) continue
-                out[name] = v
-                models++
-            }
+            val candidates = DOM_MODEL.findAll(text).mapNotNull { m ->
+                pctOrNull(m.groupValues[2])?.let { m.groupValues[1] to it }
+            }.toList()
+            out.putAll(modelRows(candidates))
             return out
         }
 
@@ -126,28 +149,24 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             val out = LinkedHashMap<String, Double>()
             if (api == null) return out
             val limits = api.optJSONArray("limits")
-            var models = 0
+            val scoped = mutableListOf<Pair<String, Double>>()
             if (limits != null) {
                 for (i in 0 until limits.length()) {
                     val l = limits.optJSONObject(i) ?: continue
                     val v = pct(l.opt("percent")) ?: continue
-                    val name = when (l.optString("kind")) {
-                        "session" -> SESSION_NAME
-                        "weekly_all" -> WEEKLY_NAME
-                        "weekly_scoped" -> {
-                            if (models >= MAX_MODEL_ROWS) null
-                            else l.optJSONObject("scope")?.optJSONObject("model")
-                                ?.optString("display_name", "")?.let { modelRowName(it) }
-                        }
-                        else -> null
-                    } ?: continue
-                    if (name in out) continue
-                    if (name != SESSION_NAME && name != WEEKLY_NAME) models++
-                    out[name] = v
+                    when (l.optString("kind")) {
+                        "session" -> if (SESSION_NAME !in out) out[SESSION_NAME] = v
+                        "weekly_all" -> if (WEEKLY_NAME !in out) out[WEEKLY_NAME] = v
+                        "weekly_scoped" -> l.optJSONObject("scope")?.optJSONObject("model")
+                            ?.optString("display_name", "")?.takeIf { it.isNotBlank() }
+                            ?.let { scoped.add(it to v) }
+                        else -> {}
+                    }
                 }
             }
             if (SESSION_NAME !in out) pct(api.optJSONObject("five_hour")?.opt("utilization"))?.let { out[SESSION_NAME] = it }
             if (WEEKLY_NAME !in out) pct(api.optJSONObject("seven_day")?.opt("utilization"))?.let { out[WEEKLY_NAME] = it }
+            out.putAll(modelRows(scoped))
             return out
         }
 

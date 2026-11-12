@@ -255,4 +255,58 @@ class ClaudeParseUsageTest {
         assertEquals(20f, byName(dom("Your usage\nThis week\nResets Sat\n20% used\n"), "Claude wk")!!.quota.used, 0.001f)
         assertEquals(20f, byName(dom("Your usage\nFable\nUp to 50% of your weekly limit\nResets Sat\n20% used\n"), "Fable wk")!!.quota.used, 0.001f)
     }
+
+    @Test
+    fun `claude july all-models row without a value does not borrow a model row value`() {
+        // Council round af493653dfd7 (openai seat), Critical: "Sonnet" is a plain model-name line,
+        // not a known label, so only a line-structured row (label, decoration, value) stops it.
+        val r = dom("Plan usage limits\nWeekly limits\nAll models\nResets Sat 12:00 PM\nSonnet\nResets Sat 12:00 PM\n11% used\n")
+        // Mutation-checked: DECOR widened to any line without '%' -> red (Claude wk would read 11).
+        assertNull(byName(r, "Claude wk"))
+        // Twin: the same rows with the all-models value present are read.
+        assertEquals(15f, byName(dom(claudeJuly), "Claude wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude rows tolerate icon-glyph and reset lines but nothing else`() {
+        val glyph = "\uE027"
+        assertEquals(60f, byName(dom("Your usage\nThis week\n$glyph\nResets Saturday\n60% used\n"), "Claude wk")!!.quota.used, 0.001f)
+        // A line with letters that is not a reset line is not decoration.
+        assertNull(byName(dom("Your usage\nThis week\nSomething else\n60% used\n"), "Claude wk"))
+    }
+
+    private fun scoped(name: String, pct: Int) = JSONObject().put("kind", "weekly_scoped").put("percent", pct)
+        .put("scope", JSONObject().put("model", JSONObject().put("display_name", name)))
+
+    @Test
+    fun `claude model names that collide after truncation are omitted, not merged`() {
+        // Council round af493653dfd7 (openai seat), Important: both become "Claude Opus wk".
+        val api = JSONObject().put("limits", org.json.JSONArray()
+            .put(JSONObject().put("kind", "weekly_all").put("percent", 40))
+            .put(scoped("Claude Opus 4.5", 10)).put(scoped("Claude Opus 4.6", 90)).put(scoped("Fable", 30)))
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = api)).results
+        // Mutation-checked: the collision check in modelRows removed -> red.
+        assertTrue(successes(r).none { it.quota.name == "Claude Opus wk" })
+        // Twin: a non-colliding model row in the same response is kept.
+        assertEquals(30f, byName(r, "Fable wk")!!.quota.used, 0.001f)
+        assertEquals(40f, byName(r, "Claude wk")!!.quota.used, 0.001f)
+        // The same collision in the page text is omitted too.
+        val text = "Your usage\nClaude Opus 4.5\nUp to 50% of your weekly limit\n10% used\nClaude Opus 4.6\nUp to 50% of your weekly limit\n90% used\n"
+        assertNull(byName(dom(text), "Claude Opus wk"))
+        assertEquals(10f, byName(dom(text.substringBefore("Claude Opus 4.6")), "Claude Opus wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude model named like an aggregate row is omitted`() {
+        // A scoped model whose name is "Claude" would become "Claude wk", the all-models row.
+        val api = JSONObject().put("limits", org.json.JSONArray()
+            .put(JSONObject().put("kind", "weekly_all").put("percent", 40)).put(scoped("Claude", 99)))
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = api)).results
+        // Mutation-checked: the reserved-name check in modelRows removed -> red (99 could win).
+        assertEquals(40f, byName(r, "Claude wk")!!.quota.used, 0.001f)
+        // Twin: order reversed; the aggregate still keeps its own value.
+        val api2 = JSONObject().put("limits", org.json.JSONArray()
+            .put(scoped("Claude", 99)).put(JSONObject().put("kind", "weekly_all").put("percent", 40)))
+        assertEquals(40f, byName(ClaudeScraper.parse(claudeInput("", usageReady = false, api = api2)).results, "Claude wk")!!.quota.used, 0.001f)
+    }
 }
