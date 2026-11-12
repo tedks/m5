@@ -16,7 +16,31 @@ M5StickC Plus  ◄──BLE──  Android phone  ──HTTPS──►  claude.a
 See `README.md` for the end-user setup guide (flashing, sideloading, account
 setup, controls, known limitations).
 
-## Where things live
+## Project structure
+
+### Checkout layout (on a dev machine)
+
+The project root is a bare repo with one worktree per branch, not a checkout.
+Run every command below from a worktree (e.g. `master/`), never from the root.
+
+```
+~/Projects/m5/
+├── .git/              bare repo
+├── create-worktree    helper: ./create-worktree <branch> makes ../m5-<branch>/
+├── master/            primary worktree, branch main
+├── m5-<branch>/       one worktree per feature branch
+├── secrets/           NOT a worktree, never committed:
+│                        secrets/adb/   adb vendor keys (see the adb section)
+│                        secrets/tokens
+├── org/               local coordination records, not committed
+└── .ditz-worktree/    ditz's internal worktree (ditz-metadata branch)
+```
+
+`core.bare` lives in `.git/config.worktree` because ditz enables
+`extensions.worktreeConfig`. A plain `git clone` of the public repo has none of
+this; there the tree below is the clone root.
+
+### Inside each worktree
 
 ```
 firmware/                  ESP32 Arduino firmware (PlatformIO)
@@ -56,17 +80,25 @@ invokes them.
 
 ## Hardware / machine map
 
-The two devices are plugged into **different** machines. Know which one you need.
+The goal is to depend on framework0 only. Current state of each device:
 
-| Device | Plugged into | Why |
-|--------|--------------|-----|
-| M5StickC Plus (`/dev/ttyUSB0`) | **tower0** | Only enumerates reliably on tower0. framework0 fails with USB error -110 (see m5-7mt). |
-| Android phone (adb, serial `59171FDCG000Y1`) | **framework0** | The dev machine — this repo's usual working directory. |
+| Device | Intended | Works today? |
+|--------|----------|--------------|
+| Android phone (adb, serial `59171FDCG000Y1`) | **framework0** (the dev machine) | Yes. |
+| M5StickC Plus (`/dev/ttyUSB0`) | **framework0** | **No.** It does not enumerate there yet (kernel USB error -110, see m5-7mt), and the framework0 user is not yet in the `dialout` group. |
 
-## Flashing the M5 firmware (on tower0)
+Until m5-7mt is resolved, the last known-good way to flash is via **tower0**
+(next section). Do not assume flashing from framework0 works; check
+`ls /dev/ttyUSB0` and `id` first.
 
-The M5 is plugged into **tower0**, not the local dev machine. Build locally, copy
-the three binaries to tower0, and flash them with esptool over SSH.
+## Flashing the M5 firmware
+
+### Last known-good path: via tower0
+
+This is the only flashing path verified to work. It needs the M5 plugged into
+**tower0**. Build locally, copy the three binaries to tower0, and flash them
+with esptool over SSH. (Local flashing from framework0 is the intended setup but
+is blocked, see the machine map above.)
 
 **CRITICAL: flash all three binaries at their correct offsets. NEVER flash
 `firmware.bin` alone at `0x0` — that overwrites the bootloader and bricks boot.**
@@ -102,7 +134,26 @@ Check the M5 is connected first: `ssh tower0.local "ls /dev/ttyUSB0"`.
 ## Reading adb / deploying the APK (on framework0)
 
 The phone is plugged into **framework0** (the local dev machine). adb ships in
-the Nix dev shell (`android-tools`), so run it through `nix develop`.
+the Nix dev shell (`android-tools`), so run it through `nix develop` from a
+worktree.
+
+**adb keys.** The phone trusts one RSA key, kept in `secrets/adb/` at the
+project root (outside every worktree, never committed). The dev shell exports
+`ADB_VENDOR_KEYS` pointing there when that directory exists (it does not
+override a value you already set, and it is a silent no-op in a plain clone).
+Check with `nix develop --command bash -c 'echo $ADB_VENDOR_KEYS'`. Never read
+or print the key files.
+
+- **Never start adb with a different `HOME`**, and do not run it outside
+  `nix develop`, or an adb whose `ADB_VENDOR_KEYS` is unset. adb then
+  generates or presents a key the phone does not know and the phone shows a new
+  RSA fingerprint prompt, which the owner has asked us to stop causing.
+- **Do not `adb kill-server` casually.** Restarting the server renews the
+  authorization handshake and may re-prompt, and other sessions may be using
+  the phone through the same server.
+- **Startup race:** for a few seconds after the adb server starts, the phone
+  reports `unauthorized` or `offline`, then settles to `device`. This is not a
+  failure. Run `adb -s 59171FDCG000Y1 wait-for-device` before the first command.
 
 **Always target the phone by serial (`-s 59171FDCG000Y1`).** An emulator is
 often also attached, and bare `adb install`/`adb logcat` fails with "more than
@@ -133,8 +184,10 @@ nix develop --command bash -c 'adb -s 59171FDCG000Y1 shell screencap -p /sdcard/
   adb -s 59171FDCG000Y1 pull /sdcard/screen.png /tmp/screen.png'
 ```
 
-**adb troubleshooting.** If `adb devices` hangs or lists nothing, a stale adb
-server socket is the usual cause. Remove it and let adb restart the server:
+**adb troubleshooting.** First wait a few seconds (startup race above). If
+`adb devices` still hangs or lists nothing, a stale adb server socket is the
+usual cause. As a last resort, with the normal `HOME` and inside `nix develop`
+(so `ADB_VENDOR_KEYS` is set), remove it and let adb restart the server:
 
 ```bash
 rm -f ~/.android/adb.5037 /tmp/adb.1000.log
@@ -197,7 +250,7 @@ Notes for agents (not part of the auto-generated block above, so
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **PUSH TO REMOTE** - This is MANDATORY (run from your worktree, on your feature branch, never main):
    ```bash
    git pull --rebase
    ditz sync
