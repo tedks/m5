@@ -1,0 +1,21 @@
+id: m5-pio-portability
+title: Assess PlatformIO shell portability and Python availability
+desc: 'PR #24 council nits: assess whether the default Nix shell should keep an explicit
+  Python command for future developer scripts (current BLE Python test uses the separate
+  buildinfra shell, so no current gate breaks), and document or support NixOS hosts
+  where platformio-core may need an FHS wrapper for downloaded Xtensa tools. The mission
+  targets framework0 and its exact-head firmware build passed, so this is follow-up
+  portability work.'
+type: task
+component: dev-env
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:19:55-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:19:55-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
