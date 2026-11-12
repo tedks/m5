@@ -1,0 +1,26 @@
+id: m5-q-modelblink
+title: Should per-model wrist rows blink out on a failed refresh?
+desc: 'Context: PR #28 makes Claude per-model rows (e.g. ''Fable wk'') non-retainable,
+  so a model that leaves the plan disappears at once instead of lingering up to 60
+  min (the true-numbers-or-nothing intent). Side effect: on a failed or partial refresh
+  round (page error, timeout, panel half-rendered), per-model rows drop off the wrist
+  for that round and return on the next good one, while ''Claude wk''/''Claude 5h''
+  keep their last-known value (up to 60 min, error visible on the phone). Options:
+  (A) keep as is, rows may blink on bad rounds; (B) retain per-model rows only on
+  rounds where the Claude service produced no fresh value at all (pure error/timeout),
+  dropping them only when a successful round lacks them; small change in mergedWith.
+  Recommendation: B, if blinking is noticed on the wrist; A is acceptable meanwhile.
+  Decides: Ted (product). Blocks: nothing.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T22:27:57-00:00
+references: []
+log_events:
+- time: 2026-11-12T22:27:57-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
