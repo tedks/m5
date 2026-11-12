@@ -135,7 +135,7 @@ class ClaudeParseUsageTest {
     // -- the page's own usage JSON (GET /api/organizations/<org>/usage, fields limits /
     //    five_hour / seven_day as JS_EXTRACT passes them through)
 
-    private val claudeApi = JSONObject(fixture("claude_usage_api_projection_2026-11-12.json"))
+    private val claudeApi = JSONObject(fixture("claude_usage_api_body_2026-11-12.json"))
 
     @Test
     fun `claude today's json and panel text disagree slightly and the json wins`() {
@@ -317,8 +317,14 @@ class ClaudeParseUsageTest {
             .put("scope", JSONObject().put("model", JSONObject().put("display_name", JSONObject.NULL)).put("surface", JSONObject.NULL))
         val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(m)))).results
         assertTrue(successes(r).isEmpty())
-        // A JVM test cannot reproduce Android's coercion; this pins that only a real string is read.
         assertNull(byName(r, "null wk"))
+        // The JVM's json-java returns "" for NULL, so the case above cannot fail here. A
+        // non-string display_name does: optString would make it "true wk".
+        val t = JSONObject().put("kind", "weekly_scoped").put("percent", 50)
+            .put("scope", JSONObject().put("model", JSONObject().put("display_name", true)).put("surface", JSONObject.NULL))
+        val rt = ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(t)))).results
+        // Mutation-checked: `as? String` replaced by optString -> red.
+        assertNull(byName(rt, "true wk"))
     }
 
     @Test
