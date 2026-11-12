@@ -1,0 +1,18 @@
+id: m5-testtidy
+title: Tidy ClaudeParseUsageTest after the complete-list removal
+desc: 'PR #28 council round f3df981a7546 (anthropic nits): the case-insensitive test
+  keeps a comment and an extra monthly_pool entry that only forced the removed complete-list
+  mode; assertFalse import is now unused. Cosmetic.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T22:27:57-00:00
+references: []
+log_events:
+- time: 2026-11-12T22:27:57-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
