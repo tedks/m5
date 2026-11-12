@@ -26,9 +26,9 @@ Run every command below from a worktree (e.g. `master/`), never from the root.
 ```
 ~/Projects/m5/
 ├── .git/              bare repo
-├── create-worktree    helper: ./create-worktree <branch> makes ../m5-<branch>/
+├── create-worktree    helper: ./create-worktree <branch> makes m5-<branch>/ here
 ├── master/            primary worktree, branch main
-├── m5-<branch>/       one worktree per feature branch
+├── m5-<branch>/       one worktree per feature branch (beside master/)
 ├── secrets/           NOT a worktree, never committed:
 │                        secrets/adb/   adb vendor keys (see the adb section)
 │                        secrets/tokens
@@ -137,20 +137,23 @@ The phone is plugged into **framework0** (the local dev machine). adb ships in
 the Nix dev shell (`android-tools`), so run it through `nix develop` from a
 worktree.
 
-**adb keys.** The phone trusts one RSA key, kept in `secrets/adb/` at the
-project root (outside every worktree, never committed). The dev shell exports
-`ADB_VENDOR_KEYS` pointing there when that directory exists (it does not
-override a value you already set, and it is a silent no-op in a plain clone).
-Check with `nix develop --command bash -c 'echo $ADB_VENDOR_KEYS'`. Never read
-or print the key files.
+**adb keys.** What is verified: the phone is authorized for the dev user's own
+adb key, `~/.android/adbkey` (fingerprint
+`7A:22:2E:2D:72:DE:94:0C:53:72:72:B8:3C:C9:B8:DA`, approved by the owner on
+2026-11-12). With the normal `HOME`, adb presents that key and the phone shows
+no prompt. `secrets/adb/` (project root, outside every worktree, never
+committed) holds a key copied from tower0; the dev shell additionally offers it
+through `ADB_VENDOR_KEYS` when the directory exists (it does not override a
+value you already set, and it is a silent no-op in a plain clone). Whether the
+phone trusts the tower0 key is unproven. Check the variable with
+`nix develop --command bash -c 'echo $ADB_VENDOR_KEYS'`. Never read or print
+key files.
 
-- **Never start adb with a different `HOME`**, and do not run it outside
-  `nix develop`, or an adb whose `ADB_VENDOR_KEYS` is unset. adb then
-  generates or presents a key the phone does not know and the phone shows a new
-  RSA fingerprint prompt, which the owner has asked us to stop causing.
-- **Do not `adb kill-server` casually.** Restarting the server renews the
-  authorization handshake and may re-prompt, and other sessions may be using
-  the phone through the same server.
+- **Never start adb with a different `HOME`.** adb would generate a brand-new
+  key, and the phone would show a new RSA fingerprint prompt, which the owner
+  has asked us to stop causing.
+- **Do not `adb kill-server` or restart the server needlessly.** Other sessions
+  may be using the phone through the same server.
 - **Startup race:** for a few seconds after the adb server starts, the phone
   reports `unauthorized` or `offline`, then settles to `device`. This is not a
   failure. Run `adb -s 59171FDCG000Y1 wait-for-device` before the first command.
@@ -186,8 +189,8 @@ nix develop --command bash -c 'adb -s 59171FDCG000Y1 shell screencap -p /sdcard/
 
 **adb troubleshooting.** First wait a few seconds (startup race above). If
 `adb devices` still hangs or lists nothing, a stale adb server socket is the
-usual cause. As a last resort, with the normal `HOME` and inside `nix develop`
-(so `ADB_VENDOR_KEYS` is set), remove it and let adb restart the server:
+usual cause. As a last resort, with the normal `HOME` and inside `nix develop`,
+remove it and let adb restart the server:
 
 ```bash
 rm -f ~/.android/adb.5037 /tmp/adb.1000.log
