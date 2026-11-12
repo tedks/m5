@@ -66,14 +66,19 @@ object ResponseCapture {
                 // two different organizations) is ambiguous: which one the panel shows is
                 // unknown, so the key keeps no body at all and the scraper falls back to its
                 // label-anchored DOM extraction. Once ambiguous, it stays ambiguous.
+                // Paths are noted when a request STARTS (and again for its final URL), so a second
+                // path makes the key ambiguous even if that request then fails or returns no JSON.
                 var seq = 0, paths = {};
+                function note(key, u) {
+                    var seen = paths[key] || (paths[key] = {});
+                    seen[new URL(u, location.href).pathname] = true;
+                    if (Object.keys(seen).length > 1) { cap[key] = {at: Date.now(), ambiguous: true}; return false; }
+                    return true;
+                }
                 function keep(key, n, finalUrl, body) {
                     if (keyFor(finalUrl || '') !== key) return;
                     if (!body || typeof body !== 'object') return;
-                    var pn = new URL(finalUrl).pathname;
-                    var seen = paths[key] || (paths[key] = {});
-                    seen[pn] = true;
-                    if (Object.keys(seen).length > 1) { cap[key] = {at: Date.now(), ambiguous: true}; return; }
+                    if (!note(key, finalUrl)) return;
                     var prev = cap[key];
                     if (prev && prev.n > n) return;
                     cap[key] = {at: Date.now(), n: n, body: body};
@@ -86,6 +91,7 @@ object ResponseCapture {
                             var u = typeof input === 'string' ? input : (input && input.url) || String(input);
                             var key = keyFor(u);
                             if (key) {
+                                note(key, u);
                                 var n = ++seq;
                                 pr.then(function(r) {
                                     try {
@@ -101,7 +107,7 @@ object ResponseCapture {
                 if (X) {
                     var origOpen = X.open, origSend = X.send;
                     X.open = function(method, u) {
-                        try { this.__qwKey = keyFor(String(u)); } catch (e) {}
+                        try { this.__qwUrl = String(u); this.__qwKey = keyFor(this.__qwUrl); } catch (e) {}
                         return origOpen.apply(this, arguments);
                     };
                     X.send = function() {
@@ -109,6 +115,7 @@ object ResponseCapture {
                         try {
                             if (x.__qwKey) {
                                 var key = x.__qwKey, n = ++seq;
+                                note(key, x.__qwUrl);
                                 x.addEventListener('load', function() {
                                     try {
                                         if (x.status >= 200 && x.status < 300) {
