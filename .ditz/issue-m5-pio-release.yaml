@@ -1,0 +1,19 @@
+id: m5-pio-release
+title: Decide how release builds should source PlatformIO
+desc: Release workflow currently pip-installs unpinned PlatformIO while the dev shell
+  uses nixpkgs platformio-core. Decide whether release builds should use the same
+  Nix-packaged tool and then update the deploy workflow accordingly; owner ruling
+  required before changing CI/release behavior.
+type: task
+component: release
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:12:48-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:12:48-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
