@@ -55,13 +55,20 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
 
         // Label-anchored DOM patterns, applied in Kotlin to the page text. Today (2026-11-12):
         // "Weekly limit / Resets in 5d 23h / 85% left"; older: "Weekly usage limit ... N%
-        // remaining". Each value must follow its own label within a bounded gap.
+        // remaining". Each value must follow its OWN label within a bounded gap, and the gap may
+        // not cross a '%' or the word "limit": otherwise a label with no value of its own (or a
+        // value in another unit, like "30% used") would borrow the next quota's number.
+        private const val GAP = """(?:(?!limit|%)[\s\S]){0,80}?"""
+        private const val PCT_LEFT = """(\d+(?:\.\d+)?)\s*%\s*(?:left|remaining)"""
         private val DOM_WEEKLY = Regex(
-            """weekly\s*(?:usage\s*)?limit[\s\S]{0,80}?(\d+(?:\.\d+)?)\s*%\s*(?:left|remaining)""",
+            """(?:^|\n)[ \t]*weekly\s*(?:usage\s*)?limit$GAP$PCT_LEFT""",
             RegexOption.IGNORE_CASE
         )
+        // Labels must start a line, as the real ones do; the reset blurb ("Use a reset to restore
+        // your 5-hour limit, weekly limit, or both") names both mid-sentence. "5-hour", "5 hour",
+        // "5hour" match; "25-hour" does not.
         private val DOM_FIVE_HOUR = Regex(
-            """5[\s-]*hour\s*(?:usage\s*)?limit[\s\S]{0,80}?(\d+(?:\.\d+)?)\s*%\s*(?:left|remaining)""",
+            """(?:^|\n)[ \t]*5[\s-]*hour\s*(?:usage\s*)?limit$GAP$PCT_LEFT""",
             RegexOption.IGNORE_CASE
         )
 

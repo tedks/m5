@@ -138,4 +138,101 @@ class CodexParseUsageTest {
         val r = CodexScraper.parse("""{"error":"boom"}""").results
         assertEquals("boom", (r.single() as QuotaResult.Error).message)
     }
+
+    // ------------------------------------------------ DOM values never bleed across labels
+    // Council round 01bb15178930 (anthropic seat): with an unconstrained gap, a label without a
+    // value of its own read the NEXT quota's percentage. The gap may not cross '%' or "limit".
+
+    private fun domOnly(text: String) = CodexScraper.parse(codexInput(text, null)).results
+
+    @Test
+    fun `codex 5h shown as used does not borrow the weekly value`() {
+        val r = domOnly("5-hour limit\nResets in 2h 10m\n30% used\nWeekly limit\nResets in 5d 23h\n85% left\n")
+        // Mutation-checked: GAP back to [\s\S]{0,80}? -> red (5h would read 15).
+        assertNull(byName(r, "Codex 5h"))
+        assertEquals(15f, byName(r, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex 5h label with no value yet does not borrow the weekly value`() {
+        val r = domOnly("5-hour limit\nResets in 2h 10m\nWeekly limit\nResets in 5d 23h\n85% left\n")
+        assertNull(byName(r, "Codex 5h"))
+        assertEquals(15f, byName(r, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex reset blurb above the plan limits does not lend weekly to 5h`() {
+        val r = domOnly("Use a reset to restore your 5-hour limit, weekly limit, or both\nAvailable\n2\nWeekly limit\nResets in 5d 23h\n85% left\n")
+        assertNull(byName(r, "Codex 5h"))
+        assertEquals(15f, byName(r, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex weekly shown as used does not borrow the 5h value`() {
+        val r = domOnly("Weekly limit\nResets in 5d 23h\n15% used\n5-hour limit\nResets in 2h\n70% left\n")
+        // Mutation-checked: GAP back to [\s\S]{0,80}? -> red (weekly would read 30).
+        assertEquals("Weekly usage limit not found on page", (r.first { it is QuotaResult.Error } as QuotaResult.Error).message)
+        assertNull(byName(r, "Codex wk"))
+        // Twin: the 5h block's own value is read.
+        assertEquals(30f, byName(r, "Codex 5h")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex 5h block in the text is read when the json has none`() {
+        val r = domOnly("5-hour limit\nResets in 2h 10m\n70% left\nWeekly limit\nResets in 5d 23h\n85% left\n")
+        // Mutation-checked: DOM_FIVE_HOUR made to never match -> red.
+        val h = byName(r, "Codex 5h")!!
+        assertEquals(30f, h.quota.used, 0.001f)
+        assertEquals("dom", h.source)
+        assertEquals(15f, byName(r, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex older 5 hour usage limit remaining layout is read`() {
+        val r = domOnly("5 hour usage limit\n\n60%\nremaining\nWeekly usage limit\n\n98%\nremaining\n")
+        assertEquals(40f, byName(r, "Codex 5h")!!.quota.used, 0.001f)
+        assertEquals(2f, byName(r, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex 25-hour is not a 5-hour limit`() {
+        val r = domOnly("25-hour limit\n10% left\nWeekly limit\n85% left\n")
+        // Mutation-checked: line-start anchor removed -> red.
+        assertNull(byName(r, "Codex 5h"))
+        // Twin: the same text with a real 5-hour label is read.
+        assertEquals(90f, byName(domOnly("5-hour limit\n10% left\nWeekly limit\n85% left\n"), "Codex 5h")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex five hour present but weekly missing still reports the weekly error`() {
+        val rl = JSONObject().put("secondary_window", window(18000, 40))
+        val r = CodexScraper.parse(codexInput("", rl)).results
+        // Mutation-checked: the weekly-missing Error branch removed -> red.
+        assertEquals("Weekly usage limit not found on page", (r.first { it is QuotaResult.Error } as QuotaResult.Error).message)
+        assertEquals(40f, byName(r, "Codex 5h")!!.quota.used, 0.001f)
+        assertEquals(2, r.size)
+    }
+
+    @Test
+    fun `codex rounding difference within tolerance does not warn`() {
+        // The page renders 85% left for a used_percent of 15.4; that is rounding, not disagreement.
+        val rl = JSONObject().put("primary_window", window(604800, 15.4))
+        val p = CodexScraper.parse(codexInput(codexText, rl))
+        // Mutation-checked: CROSS_CHECK_TOLERANCE lowered to 0 -> red.
+        assertTrue(p.warnings.isEmpty())
+        assertEquals(15.4f, byName(p.results, "Codex wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `codex reset blurb beside an unrelated percentage is not a value`() {
+        // Council round 01bb15178930 (openai seat): the blurb names both limits mid-sentence; a
+        // percentage that follows must not be read as either of them.
+        val r = domOnly("Use a reset to restore your 5-hour limit, weekly limit, or both\nAvailable\n2\n85% left\n")
+        // Mutation-checked: line-start anchor removed from DOM_WEEKLY -> red.
+        assertEquals("Weekly usage limit not found on page", (r.single() as QuotaResult.Error).message)
+        // Twin: the same percentage under a real "Weekly limit" line is read.
+        val r2 = domOnly("Use a reset to restore your 5-hour limit, weekly limit, or both\nAvailable\n2\nWeekly limit\n85% left\n")
+        assertEquals(15f, byName(r2, "Codex wk")!!.quota.used, 0.001f)
+        assertNull(byName(r2, "Codex 5h"))
+    }
 }
