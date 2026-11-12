@@ -124,10 +124,10 @@ data class QuotaSnapshot(
  *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
  *    payload must never present deliberately-unavailable data as if it were live — showing
  *    hour-old numbers under a "logged out" service reads as current and misleads.
- *  - If any fresh Success for the service is marked [QuotaResult.Success.completeSet] (it came with
- *    the page's complete list of that service's quotas), that list is the complete current set: a quota missing from it is gone (e.g. a per-model
- *    row whose model left the plan, or a row whose name changed), so nothing is retained for that
- *    service. Retention exists for partial settles of the rendered text, not for this.
+ *  - If any fresh Success for the service is marked [QuotaResult.Success.completeSet] (it came
+ *    with the page's complete list of that service's quotas), a quota missing from that list is
+ *    gone (e.g. a per-model row whose model left the plan, or a row whose name changed), so
+ *    nothing is retained for that service. Retention is for partial settles, not for this.
  *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
  *    to [now] is dropped regardless.
  *

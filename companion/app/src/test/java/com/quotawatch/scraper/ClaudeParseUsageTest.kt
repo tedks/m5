@@ -400,4 +400,56 @@ class ClaudeParseUsageTest {
         val plain = scoped("Fable", 80).also { it.getJSONObject("scope").put("surface", JSONObject.NULL) }
         assertEquals(80f, byName(ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(plain)))).results, "Fable wk")!!.quota.used, 0.001f)
     }
+
+    // ------------------------------------------------ a complete JSON list governs the rows
+    // PR #28 council round 17771fe92365 (openai seat).
+
+    private val fableText = "Your usage\nThis week\nResets Sat\n40% used\nFable\nUp to 50% of your weekly limit\nResets Sat\n70% used\n"
+
+    @Test
+    fun `claude text-only model row is not shown when the complete json list lacks it`() {
+        val api = JSONObject().put("limits", org.json.JSONArray().put(JSONObject().put("kind", "weekly_all").put("percent", 40)))
+        val r = ClaudeScraper.parse(claudeInput(fableText, api = api)).results
+        // Mutation-checked: the api.complete branch in parse removed -> red.
+        assertNull(byName(r, "Fable wk"))
+        assertEquals(40f, byName(r, "Claude wk")!!.quota.used, 0.001f)
+        // Twin: with no limits list (legacy seven_day only), the text's Fable row is added.
+        val legacy = JSONObject().put("seven_day", JSONObject().put("utilization", 40))
+        assertEquals(70f, byName(ClaudeScraper.parse(claudeInput(fableText, api = legacy)).results, "Fable wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude empty complete json list is unavailable, so retained rows drop`() {
+        val r = ClaudeScraper.parse(claudeInput("", api = JSONObject().put("limits", org.json.JSONArray()))).results
+        // Mutation-checked: the empty-complete branch removed -> red (an Error instead).
+        assertEquals("No usage limits reported", (r.single() as QuotaResult.Unavailable).reason)
+        // Twin: no JSON at all and no text is still the honest error.
+        assertTrue(ClaudeScraper.parse(claudeInput("")).results.single() is QuotaResult.Error)
+    }
+
+    @Test
+    fun `claude json with an unknown limit kind is not complete and the text still adds rows`() {
+        // A redesign that adds kinds must not silence the label-anchored fallback.
+        val api = JSONObject().put("limits", org.json.JSONArray()
+            .put(JSONObject().put("kind", "weekly_all").put("percent", 40))
+            .put(JSONObject().put("kind", "monthly_pool").put("percent", 12)))
+        val r = ClaudeScraper.parse(claudeInput(fableText, api = api)).results
+        // Mutation-checked: unknown kinds no longer clear `understood` -> red.
+        assertEquals(70f, byName(r, "Fable wk")!!.quota.used, 0.001f)
+        assertTrue(successes(r).none { it.completeSet })
+        assertTrue(successes(r).none { it.quota.used == 12f })
+    }
+
+    @Test
+    fun `claude model names match across sources case-insensitively`() {
+        // innerText applies CSS text-transform; "FABLE" in the text is the JSON's "Fable".
+        // An unknown kind makes the list incomplete, so the text could add rows of its own.
+        val api = JSONObject().put("limits", org.json.JSONArray().put(scoped("Fable", 69))
+            .put(JSONObject().put("kind", "monthly_pool").put("percent", 1)))
+        val text = "Your usage\nFABLE\nUp to 50% of your weekly limit\nResets Sat\n69% used\n"
+        val r = ClaudeScraper.parse(claudeInput(text, api = api)).results
+        // Mutation-checked: lowercase() dropped from the name key -> red (two rows).
+        assertEquals(listOf("Fable wk"), successes(r).map { it.quota.name })
+        assertEquals("api", successes(r).single().source)
+    }
 }
