@@ -74,7 +74,7 @@
               fi
 
               echo "M5StickC Plus dev environment loaded"
-              echo "  pio:     $(pio --version 2>/dev/null || echo 'not installed')"
+              echo "  pio:     $(pio --version)"
               echo "  esptool: $(esptool version 2>/dev/null || echo 'available')"
               echo "  java:    $(java -version 2>&1 | head -1)"
               echo "  gradle:  $(gradle --version 2>/dev/null | grep Gradle | head -1 || echo 'available')"
