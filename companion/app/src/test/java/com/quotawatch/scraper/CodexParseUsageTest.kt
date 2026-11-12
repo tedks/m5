@@ -33,7 +33,7 @@ class CodexParseUsageTest {
 
     private fun window(seconds: Int, used: Number) =
         JSONObject().put("used_percent", used).put("limit_window_seconds", seconds)
-            .put("reset_after_seconds", 1000).put("reset_at", 1795034407)
+            .put("reset_after_seconds", 1000).put("reset_at", 1800000000)
 
     @Test
     fun `codex today's page json and text agree on weekly and the json wins`() {

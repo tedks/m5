@@ -23,10 +23,10 @@ Available
 2
 History
 Full reset
-Expires Nov 30, 2:49 PM EST
+Expires <date 1>
 Use reset
 Full reset
-Expires Dec 1, 5:25 PM EST
+Expires <date 2>
 Use reset
 Credits
 Buy credits or turn on automatic reload to continue using Work and Codex when you reach usage limits. Learn more

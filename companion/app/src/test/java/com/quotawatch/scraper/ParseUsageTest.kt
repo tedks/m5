@@ -6,8 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Unit tests for the pure JSON→QuotaResult mapping in ClaudeScraper (Codex: CodexParseUsageTest). The extraction JS runs in a
- * WebView (not testable here), but everything downstream of its JSON output is pure Kotlin: these
+ * Unit tests for the pure JSON→QuotaResult mapping in ClaudeScraper (Codex: CodexParseUsageTest).
+ * The extraction JS runs in a WebView (not testable here), but everything downstream of its JSON
+ * output is pure Kotlin: these
  * lock in that only labeled values become Successes and that the absence of usage data fails
  * honestly rather than fabricating a number.
  */
