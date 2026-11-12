@@ -11,3 +11,5 @@ companion/app/build/
 companion/wear/build/
 companion/build/
 tokens
+# private material (adb keys, tokens); the project layout keeps it at the root
+/secrets/
