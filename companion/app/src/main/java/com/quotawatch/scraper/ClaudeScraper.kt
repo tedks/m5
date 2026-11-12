@@ -59,12 +59,12 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         }
 
         /**
-         * Per-model rows from the (page label, used percent) candidates of both sources, JSON first,
-         * as name -> (JSON value, text value). Fails closed on collisions: a wrist name produced by two different labels (e.g. "Claude Opus 4.5"
-         * and "Claude Opus 4.6" both truncate to "Claude Opus wk"), or equal to the aggregate
-         * rows' names, is omitted entirely, since the wrist could not say whose number it is.
-         * A label repeated verbatim keeps its first value. The row cap is applied in [parse], across
-         * both sources together.
+         * Per-model rows from the (page label, used percent) candidates of both sources, JSON
+         * first, as name -> (JSON value, text value). Fails closed on collisions: a wrist name
+         * produced by two different labels (e.g. "Claude Opus 4.5" and "Claude Opus 4.6" both
+         * truncate to "Claude Opus wk"), or equal to an aggregate row's name, is omitted entirely,
+         * since the wrist could not say whose number it is. A label repeated verbatim keeps its
+         * first value. The row cap is applied in [parse], across both sources together.
          */
         internal fun modelRows(
             api: List<Pair<String, Double>>,
@@ -102,7 +102,11 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         internal data class Extract(
             val values: LinkedHashMap<String, Double>,
             val models: List<Pair<String, Double>>,
-            /** The page's JSON carried its `limits` list, so its row set is complete. */
+            /**
+             * The page's JSON carried its `limits` list and every entry was understood, so its row
+             * set is complete. Assumes the captured /usage response is the panel's full list
+             * (no filtered variant of the same path has been observed).
+             */
             val complete: Boolean = false
         )
 
@@ -262,7 +266,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             if (results.isEmpty() && api.complete) {
                 // The page's complete list has no limits we can show: say so, and (as Unavailable)
                 // let mergedWith drop any previously shown Claude rows instead of retaining them.
-                return Parsed(listOf(QuotaResult.Unavailable(SERVICE, "No usage limits reported")), warnings)
+                return Parsed(listOf(QuotaResult.Unavailable(SERVICE, "No displayable usage limits")), warnings)
             }
             if (results.isEmpty()) {
                 val msg = if (json.optBoolean("usageReady", false)) {

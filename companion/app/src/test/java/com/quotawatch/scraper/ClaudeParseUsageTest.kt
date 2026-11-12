@@ -423,7 +423,7 @@ class ClaudeParseUsageTest {
     fun `claude empty complete json list is unavailable, so retained rows drop`() {
         val r = ClaudeScraper.parse(claudeInput("", api = JSONObject().put("limits", org.json.JSONArray()))).results
         // Mutation-checked: the empty-complete branch removed -> red (an Error instead).
-        assertEquals("No usage limits reported", (r.single() as QuotaResult.Unavailable).reason)
+        assertEquals("No displayable usage limits", (r.single() as QuotaResult.Unavailable).reason)
         // Twin: no JSON at all and no text is still the honest error.
         assertTrue(ClaudeScraper.parse(claudeInput("")).results.single() is QuotaResult.Error)
     }
