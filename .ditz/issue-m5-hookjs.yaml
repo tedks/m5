@@ -22,3 +22,10 @@ log_events:
   who: Ted Smith
   what: created
   comment: ""
+- time: 2026-11-12T21:54:33-00:00
+  who: Ted Smith
+  what: commented
+  comment: 'Also from PR #26 council round 28b56172f7e5 (anthropic, non-blocking nit):
+    in the X.open wrapper, if String(u) throws, a reused XHR keeps the previous __qwUrl/__qwKey.
+    origOpen then throws too, so nothing is captured, but clearing both before the
+    conversion would be tidier. Fold into the hook-test work.'
