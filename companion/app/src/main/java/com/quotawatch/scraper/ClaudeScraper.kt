@@ -21,45 +21,159 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         const val ORIGIN = "https://claude.ai"
         const val SERVICE = "claude"
 
-        // claude.ai/settings/usage client-redirects to /new#settings/usage and renders usage as a
-        // modal ([role="dialog"]) over the app shell. The 5-hour ("Current session") and weekly
-        // ("Weekly limits") sections can render on separate ticks, so only require ONE of them to
-        // be present — the scraper's valid-and-stable check waits out the other section catching up
-        // as long as there's time left, and the timeout covers the modal never rendering. A false
-        // predicate (both values absent) keeps polling; it never accepts unlabeled junk because the
-        // extraction JS only emits values anchored to the "Current session"/"Weekly limits" labels.
+        const val SESSION_NAME = "Claude 5h"
+        const val WEEKLY_NAME = "Claude wk"
+
+        // Firmware parses a row name with sscanf "%15[^:]" — at most 15 bytes, no ':'. A
+        // per-model row is "<model> wk", so the model part gets at most 12 characters.
+        private const val MODEL_LABEL_MAX = 12
+        private const val MAX_MODEL_ROWS = 4
+
+        // ~1s of extra polling after the first settle so a source that lands a beat later (the
+        // JSON vs. the rendered panel) is still included. Bounded; see UsageScraper.decidePoll.
+        private const val GRACE_POLLS = 2
+
+        // Disagreement (percentage points) between api and dom above which a warning is logged.
+        private const val CROSS_CHECK_TOLERANCE = 1.0
+
+        // Settled once any weekly or session value is present (from either source); the poll
+        // loop's stable-twice check and grace window wait out the rest of the panel rendering.
         private fun isSettled(raw: String): Boolean = try {
-            val json = JSONObject(raw)
-            json.optDouble("fiveHourPct", -1.0) >= 0 || json.optDouble("sevenDayPct", -1.0) >= 0
+            parse(raw).results.any { it is QuotaResult.Success }
         } catch (e: Exception) {
             false
         }
 
         /**
-         * Map the extraction JSON to quota results. Pure (no Android deps) so it's unit-testable.
-         *
-         * Only values the JS extracted from explicitly-labeled usage elements ("Current session",
-         * "Weekly limits") reach here as `fiveHourPct` / `sevenDayPct`; anything else is absent
-         * (-1). When neither is present we fail honestly with a distinguishable message — since PR2
-         * a failed scrape retains last-known-good numbers rather than blanking the display, so an
-         * honest error is strictly better than a fabricated percentage.
+         * Short wrist name for a per-model weekly row, or null if [label] doesn't look like a
+         * model name. Keeps letters, digits, space, '.', '-'; collapses whitespace; truncates.
          */
-        fun parseUsage(data: String): List<QuotaResult> {
+        fun modelRowName(label: String): String? {
+            val clean = label.trim().replace(Regex("\\s+"), " ")
+            if (clean.isEmpty() || !clean.matches(Regex("[A-Za-z][A-Za-z0-9 .\\-]*"))) return null
+            return clean.take(MODEL_LABEL_MAX).trimEnd() + " wk"
+        }
+
+        // Label-anchored patterns over the usage panel text. Every value must follow its own
+        // label within a bounded gap; there is no "first percentage anywhere" fallback, which
+        // once reported sidebar junk as quota (bd m5-39u/m5-iia).
+        private val NUM = """(\d+(?:\.\d+)?)\s*%\s*used"""
+        // July 2026 layout: "Current session · Resets in N hr · 7% used".
+        private val DOM_SESSION = Regex("""current session[\s\S]{0,160}?$NUM""", RegexOption.IGNORE_CASE)
+        // July 2026 layout: "Weekly limits / All models · Resets ... · 15% used".
+        private val DOM_WEEKLY_OLD = Regex("""weekly limits[\s\S]{0,40}?all models[\s\S]{0,160}?$NUM""", RegexOption.IGNORE_CASE)
+        // November 2026 layout: a line that is exactly "This week", then "Resets ...", then
+        // "60% used". ("This week's usage by product" further down is not that line.)
+        private val DOM_WEEKLY = Regex("""(?:^|\n)[ \t]*this week[ \t]*\n[\s\S]{0,120}?$NUM""", RegexOption.IGNORE_CASE)
+        // November 2026 per-model row: "<model>" line, "Up to N% of your weekly limit" line,
+        // up to two more lines (the reset, an icon glyph), then "M% used".
+        private val DOM_MODEL = Regex(
+            """(?:^|\n)([^\n]{1,40})\n[ \t]*up to \d+(?:\.\d+)?\s*% of your weekly limit[ \t]*\n(?:[^\n]{0,80}\n){0,2}[ \t]*$NUM""",
+            RegexOption.IGNORE_CASE
+        )
+
+        data class Parsed(val results: List<QuotaResult>, val warnings: List<String>)
+
+        /** [parse] without the warnings. */
+        fun parseUsage(data: String): List<QuotaResult> = parse(data).results
+
+        private fun pctOrNull(s: String?): Double? = s?.toDoubleOrNull()?.takeIf { it in 0.0..100.0 }
+
+        /** Quota name -> used percent from the usage panel text, in display order. */
+        internal fun domValues(text: String): LinkedHashMap<String, Double> {
+            val out = LinkedHashMap<String, Double>()
+            pctOrNull(DOM_SESSION.find(text)?.groupValues?.get(1))?.let { out[SESSION_NAME] = it }
+            val weekly = DOM_WEEKLY_OLD.find(text) ?: DOM_WEEKLY.find(text)
+            pctOrNull(weekly?.groupValues?.get(1))?.let { out[WEEKLY_NAME] = it }
+            var models = 0
+            for (m in DOM_MODEL.findAll(text)) {
+                if (models >= MAX_MODEL_ROWS) break
+                val name = modelRowName(m.groupValues[1]) ?: continue
+                val v = pctOrNull(m.groupValues[2]) ?: continue
+                if (name in out) continue
+                out[name] = v
+                models++
+            }
+            return out
+        }
+
+        /** Capture key for the page's own usage request (see ResponseCapture). */
+        const val CAPTURE_KEY = "claudeUsage"
+
+        // The usage panel fetches GET /api/organizations/<org>/usage itself (observed 2026-11-12,
+        // see the capability survey on m5-scr). The org id is in the path only; the pattern does
+        // not need to know it.
+        val CAPTURE_SCRIPT = ResponseCapture.hookScript(mapOf(CAPTURE_KEY to "^/api/organizations/[^/]+/usage$"))
+
+        private fun pct(v: Any?): Double? = (v as? Number)?.toDouble()?.takeIf { it in 0.0..100.0 }
+
+        /**
+         * Quota name -> used percent from the page's own usage JSON (the subset JS_EXTRACT
+         * passes through: `limits`, `five_hour`, `seven_day`), in display order.
+         *
+         * `limits` is the list the panel renders from: kind "session" -> Claude 5h, "weekly_all"
+         * -> Claude wk, "weekly_scoped" with a `scope.model.display_name` -> "<model> wk".
+         * Unknown kinds, and scoped limits without a model (e.g. a surface scope), are ignored
+         * rather than shown under a guessed name. The older `five_hour.utilization` /
+         * `seven_day.utilization` fields fill in only what `limits` did not provide.
+         */
+        internal fun apiValues(api: JSONObject?): LinkedHashMap<String, Double> {
+            val out = LinkedHashMap<String, Double>()
+            if (api == null) return out
+            val limits = api.optJSONArray("limits")
+            var models = 0
+            if (limits != null) {
+                for (i in 0 until limits.length()) {
+                    val l = limits.optJSONObject(i) ?: continue
+                    val v = pct(l.opt("percent")) ?: continue
+                    val name = when (l.optString("kind")) {
+                        "session" -> SESSION_NAME
+                        "weekly_all" -> WEEKLY_NAME
+                        "weekly_scoped" -> {
+                            if (models >= MAX_MODEL_ROWS) null
+                            else l.optJSONObject("scope")?.optJSONObject("model")
+                                ?.optString("display_name", "")?.let { modelRowName(it) }
+                        }
+                        else -> null
+                    } ?: continue
+                    if (name in out) continue
+                    if (name != SESSION_NAME && name != WEEKLY_NAME) models++
+                    out[name] = v
+                }
+            }
+            if (SESSION_NAME !in out) pct(api.optJSONObject("five_hour")?.opt("utilization"))?.let { out[SESSION_NAME] = it }
+            if (WEEKLY_NAME !in out) pct(api.optJSONObject("seven_day")?.opt("utilization"))?.let { out[WEEKLY_NAME] = it }
+            return out
+        }
+
+        /**
+         * Map the extraction JSON (see JS_EXTRACT) to quota results. Pure, so it is unit-tested.
+         *
+         * Input: {"usageReady": bool, "api": null | {...}, "text": <usage panel text>}.
+         * Per quota the api value wins and the label-anchored text is the fallback; a
+         * disagreement above [CROSS_CHECK_TOLERANCE] keeps api and returns a warning. Values
+         * outside 0..100 are absent. Nothing found is an honest error, worded by whether the
+         * panel rendered.
+         */
+        fun parse(data: String): Parsed {
             val json = JSONObject(data)
             if (json.has("error")) {
-                return listOf(QuotaResult.Error("claude", json.getString("error")))
+                return Parsed(listOf(QuotaResult.Error(SERVICE, json.getString("error"))), emptyList())
             }
+            val api = apiValues(json.optJSONObject("api"))
+            val dom = domValues(json.optString("text", ""))
 
             val results = mutableListOf<QuotaResult>()
-
-            val fiveHourPct = json.optDouble("fiveHourPct", -1.0)
-            if (fiveHourPct in 0.0..100.0) {
-                results.add(QuotaResult.Success("claude", Quota("Claude 5h", fiveHourPct.toFloat(), 100f, "%")))
-            }
-
-            val sevenDayPct = json.optDouble("sevenDayPct", -1.0)
-            if (sevenDayPct in 0.0..100.0) {
-                results.add(QuotaResult.Success("claude", Quota("Claude wk", sevenDayPct.toFloat(), 100f, "%")))
+            val warnings = mutableListOf<String>()
+            val names = LinkedHashSet<String>().apply { addAll(api.keys); addAll(dom.keys) }
+            for (name in names) {
+                val a = api[name]
+                val d = dom[name]
+                if (a != null && d != null && kotlin.math.abs(a - d) > CROSS_CHECK_TOLERANCE) {
+                    warnings.add("$name: api=$a dom=$d disagree; using api")
+                }
+                val (v, src) = if (a != null) a to "api" else d!! to "dom"
+                results.add(QuotaResult.Success(SERVICE, Quota(name, v.toFloat(), 100f, "%"), source = src))
             }
 
             if (results.isEmpty()) {
@@ -68,10 +182,9 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                 } else {
                     "Usage panel did not render"
                 }
-                results.add(QuotaResult.Error("claude", msg))
+                results.add(QuotaResult.Error(SERVICE, msg))
             }
-
-            return results
+            return Parsed(results, warnings)
         }
 
         /** Pulls the raw `usageReady` signal straight from the extraction JSON, defensively. */
@@ -113,7 +226,10 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         }
 
         return try {
-            val result = scraper.scrape(USAGE_URL, JS_EXTRACT, isSettled = ::isSettled)
+            val result = scraper.scrape(
+                USAGE_URL, JS_EXTRACT, isSettled = ::isSettled, graceExtraPolls = GRACE_POLLS,
+                captureScript = CAPTURE_SCRIPT
+            )
             if (result.sessionExpired) {
                 sessionStore.recordOutcome(SERVICE, SessionOutcome.EXPIRED)
                 return listOf(QuotaResult.Unavailable("claude", "Session expired — tap 'Re-login' in Settings"))
@@ -124,8 +240,12 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                 return listOf(QuotaResult.Error("claude", "Page load timed out"))
             }
 
-            Log.d(TAG, "Parsed: ${result.data.take(200)}")
-            val parsed = parseUsage(result.data)
+            val detailed = parse(result.data)
+            detailed.warnings.forEach { Log.w(TAG, "Cross-check: $it") }
+            val parsed = detailed.results
+            parsed.forEach {
+                if (it is QuotaResult.Success) Log.i(TAG, "Quota ${it.quota.name}=${it.quota.used}% source=${it.source}")
+            }
             // A completed parse alone isn't proof the session is fine — a login wall/interstitial
             // that isn't caught by the URL-based sessionExpired check could render *some* page and
             // parse to an all-Error result. Only record OK when there's positive evidence: an
@@ -141,55 +261,34 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         }
     }
 
-    // Extraction targets the real usage modal on claude.ai/new#settings/usage (mobile WebView),
-    // verified live 2026-07-17. The modal renders (as [role="dialog"]) within ~3s of the redirect
-    // and reads:
-    //   Plan usage limits
-    //   Current session  · Resets in N hr M min · 7% used         <- 5-hour rolling window
-    //   Weekly limits
-    //     All models     · Resets Sat 12:00 PM  · 15% used        <- overall weekly limit
-    //     <model name>   · Resets Sat 12:00 PM  · 11% used        <- per-model weekly limit
-    //   Usage credits    · 0% used
-    // We pull ONLY values anchored to these labels — no "first percentage anywhere" fallback, which
-    // previously grabbed sidebar/chat-list junk and silently reported ~2-3% (bd m5-39u/m5-iia).
+    // Hands Kotlin the usage panel's text (parse() does the label-anchored extraction) and the
+    // `limits` / `five_hour` / `seven_day` fields of the page's own usage JSON (CAPTURE_SCRIPT). Layout observed 2026-11-12
+    // (Ultra plan), as a dialog over /new#settings/usage:
+    //   Your usage / <plan> / <pace note>
+    //   This week / Resets Saturday 11:00 AM / 60% used                               <- weekly
+    //   Fable / Up to 50% of your weekly limit / Resets Saturday 11:00 AM / 64% used  <- model
+    //   Limit resets ... / Usage credits $0 ... / This week's usage by product ...
+    // The text is taken from the usage dialog only when one exists (it never includes the chat
+    // list); body text is the fallback for a future non-dialog settings page. Never logged.
     private val JS_EXTRACT = """
         (function() {
             try {
-                // Prefer the usage modal's text; fall back to body text (the anchors below are
-                // label-specific and appear only inside the usage panel, so either is safe).
-                var searchText = '';
+                var READY = /plan usage limits|current session|weekly limits|your usage/i;
+                var text = '';
                 var dialogs = document.querySelectorAll('[role="dialog"],[aria-modal="true"]');
                 for (var i = 0; i < dialogs.length; i++) {
                     var dt = dialogs[i].innerText || '';
-                    if (/plan usage limits|current session|weekly limits/i.test(dt)) {
-                        searchText = dt;
-                        break;
-                    }
+                    if (READY.test(dt)) { text = dt; break; }
                 }
-                if (!searchText) searchText = document.body.innerText || '';
-
-                var usageReady = /plan usage limits|current session|weekly limits/i.test(searchText);
-
-                // 5-hour rolling window: the "% used" value that follows the "Current session"
-                // label. Bounded gap so a stray later "% used" can't be captured.
-                var fiveHourPct = -1;
-                var fiveMatch = searchText.match(/current session[\s\S]{0,160}?(\d+(?:\.\d+)?)\s*%\s*used/i);
-                if (fiveMatch) fiveHourPct = parseFloat(fiveMatch[1]);
-
-                // Weekly: prefer the "All models" (overall) limit under "Weekly limits"; fall back
-                // to the first weekly "% used" if that specific label isn't present.
-                var sevenDayPct = -1;
-                var weekMatch = searchText.match(/weekly limits[\s\S]*?all models[\s\S]{0,160}?(\d+(?:\.\d+)?)\s*%\s*used/i);
-                if (!weekMatch) {
-                    weekMatch = searchText.match(/weekly limits[\s\S]{0,200}?(\d+(?:\.\d+)?)\s*%\s*used/i);
+                var usageReady = !!text;
+                if (!text) text = (document.body && document.body.innerText) || '';
+                // Only these three fields of the captured body leave the page.
+                var api = null;
+                var cap = window.${ResponseCapture.GLOBAL} && window.${ResponseCapture.GLOBAL}['$CAPTURE_KEY'];
+                if (cap && cap.body && typeof cap.body === 'object') {
+                    api = {limits: cap.body.limits || null, five_hour: cap.body.five_hour || null, seven_day: cap.body.seven_day || null};
                 }
-                if (weekMatch) sevenDayPct = parseFloat(weekMatch[1]);
-
-                return JSON.stringify({
-                    usageReady: usageReady,
-                    fiveHourPct: fiveHourPct,
-                    sevenDayPct: sevenDayPct
-                });
+                return JSON.stringify({usageReady: usageReady, api: api, text: text.slice(0, 20000)});
             } catch(e) {
                 return JSON.stringify({error: e.toString()});
             }

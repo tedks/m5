@@ -37,6 +37,14 @@ class ResponseCaptureTest {
         assertFalse(Regex("\\$[A-Za-z{]").containsMatchIn(js))
     }
 
+    @Test
+    fun `scraper patterns are embedded verbatim as RegExp sources`() {
+        assertTrue(ClaudeScraper.CAPTURE_SCRIPT.contains("['claudeUsage',new RegExp('^/api/organizations/[^/]+/usage$')]"))
+        assertTrue(CodexScraper.CAPTURE_SCRIPT.contains("['codexUsage',new RegExp('^/backend-api/wham/usage$')]"))
+        // Same-origin only.
+        assertTrue(ClaudeScraper.CAPTURE_SCRIPT.contains("p.origin !== location.origin"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `empty pattern map is rejected`() {
         ResponseCapture.hookScript(emptyMap())
