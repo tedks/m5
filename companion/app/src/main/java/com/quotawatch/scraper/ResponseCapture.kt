@@ -15,7 +15,11 @@ package com.quotawatch.scraper
  *   whatever it sends, we only read a clone of the response it already received.
  * - The wrappers always hand the page its original promise/response; any failure inside the
  *   capture path is swallowed so it cannot change the page's behavior.
- * - Cross-origin URLs are never captured, even if the path matches.
+ * - Cross-origin URLs are never captured, even if the path matches; the check is made on the
+ *   requested URL and again on the response's final URL, so a redirect elsewhere is dropped. A
+ *   response with no final URL (e.g. one a script constructed) is not captured.
+ * - Each request is numbered when it starts; an older response finishing after a newer one has
+ *   been kept is dropped, so overlapping requests cannot leave stale numbers behind.
  * - Raw bodies stay in page memory. They contain account identifiers, so the poll JS must
  *   return only numeric fields and fixed labels — never a raw body — because the poll result
  *   is logged.
@@ -50,8 +54,17 @@ object ResponseCapture {
                     } catch (e) {}
                     return null;
                 }
-                function keep(key, body) {
-                    if (body && typeof body === 'object') cap[key] = {at: Date.now(), body: body};
+                // Requests are numbered when they start. A response is kept only if (a) the URL
+                // it finally came from (after any redirect) is still same-origin and maps to the
+                // same key, and (b) no newer request for that key has already been kept, so an
+                // older response that finishes last cannot replace newer numbers.
+                var seq = 0;
+                function keep(key, n, finalUrl, body) {
+                    if (keyFor(finalUrl || '') !== key) return;
+                    if (!body || typeof body !== 'object') return;
+                    var prev = cap[key];
+                    if (prev && prev.n > n) return;
+                    cap[key] = {at: Date.now(), n: n, body: body};
                 }
                 var origFetch = window.fetch;
                 if (typeof origFetch === 'function') {
@@ -61,8 +74,9 @@ object ResponseCapture {
                             var u = typeof input === 'string' ? input : (input && input.url) || String(input);
                             var key = keyFor(u);
                             if (key) {
+                                var n = ++seq;
                                 pr.then(function(r) {
-                                    if (r && r.ok) r.clone().json().then(function(j) { keep(key, j); }, function() {});
+                                    if (r && r.ok) r.clone().json().then(function(j) { keep(key, n, r.url, j); }, function() {});
                                 }, function() {});
                             }
                         } catch (e) {}
@@ -79,14 +93,17 @@ object ResponseCapture {
                     X.send = function() {
                         var x = this;
                         try {
-                            if (x.__qwKey) x.addEventListener('load', function() {
-                                try {
-                                    if (x.status >= 200 && x.status < 300) {
-                                        var b = x.responseType === 'json' ? x.response : JSON.parse(x.responseText);
-                                        keep(x.__qwKey, b);
-                                    }
-                                } catch (e) {}
-                            });
+                            if (x.__qwKey) {
+                                var key = x.__qwKey, n = ++seq;
+                                x.addEventListener('load', function() {
+                                    try {
+                                        if (x.status >= 200 && x.status < 300) {
+                                            var b = x.responseType === 'json' ? x.response : JSON.parse(x.responseText);
+                                            keep(key, n, x.responseURL, b);
+                                        }
+                                    } catch (e) {}
+                                });
+                            }
                         } catch (e) {}
                         return origSend.apply(this, arguments);
                     };
