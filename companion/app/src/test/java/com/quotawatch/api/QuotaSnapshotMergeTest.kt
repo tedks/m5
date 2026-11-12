@@ -292,4 +292,32 @@ class QuotaSnapshotMergeTest {
         assertEquals(order1, order2)
         assertEquals(listOf("Claude 5h", "Claude wk", "Codex wk", "Actions"), order1)
     }
+
+    private fun api(service: String, name: String, fetchedAt: Long) =
+        QuotaResult.Success(service, Quota(name, 10f, 100f, "%"), fetchedAt, source = "api")
+
+    @Test
+    fun `a row missing from a fresh page-json set is gone, not retained`() {
+        // PR #28 council (anthropic I3): a per-model row whose model left the plan must not
+        // linger for up to MAX_STALE_MS beside fresh rows.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(listOf(api("claude", "Claude wk", now - 5_000), api("claude", "Fable wk", now - 5_000)), now - 5_000)
+        val fresh = QuotaSnapshot(listOf(api("claude", "Claude wk", now)), now)
+        val merged = fresh.mergedWith(previous, now)
+        // Mutation-checked: the completeServices filter removed -> red.
+        assertEquals(listOf("Claude wk"), merged.successes.map { it.quota.name })
+    }
+
+    @Test
+    fun `a row missing from a fresh text-only set is still retained (partial settle)`() {
+        // Twin of the test above: the same shape from the rendered text keeps the retention.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(listOf(api("claude", "Claude wk", now - 5_000), api("claude", "Fable wk", now - 5_000)), now - 5_000)
+        val fresh = QuotaSnapshot(listOf(QuotaResult.Success("claude", Quota("Claude wk", 10f, 100f, "%"), now, source = "dom")), now)
+        val merged = fresh.mergedWith(previous, now)
+        assertEquals(listOf("Claude wk", "Fable wk"), merged.successes.map { it.quota.name })
+        // And a page-json set for ANOTHER service does not stop this service's retention.
+        val mixed = QuotaSnapshot(fresh.results + api("codex", "Codex wk", now), now).mergedWith(previous, now)
+        assertTrue(mixed.successes.any { it.quota.name == "Fable wk" })
+    }
 }

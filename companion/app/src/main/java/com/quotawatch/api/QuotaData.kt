@@ -118,6 +118,10 @@ data class QuotaSnapshot(
  *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
  *    payload must never present deliberately-unavailable data as if it were live — showing
  *    hour-old numbers under a "logged out" service reads as current and misleads.
+ *  - If any fresh Success for the service came from the page's own JSON (`source == "api"`), that
+ *    list is the page's complete current set: a quota missing from it is gone (e.g. a per-model
+ *    row whose model left the plan, or a row whose name changed), so nothing is retained for that
+ *    service. Retention exists for partial settles of the rendered text, not for this.
  *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
  *    to [now] is dropped regardless.
  *
@@ -136,9 +140,13 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .map { it.service }
         .toSet()
 
+    // Services whose fresh rows came from the page's own JSON: their row set is complete.
+    val completeServices = successes.filter { it.source == "api" }.map { it.service }.toSet()
+
     val retainedStale = previous.successes
         .filter { (it.service to it.quota.name) !in freshSuccessKeys }
         .filter { it.service in activeServices }
+        .filter { it.service !in completeServices }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
     return copy(results = (results + retainedStale).sortedWith(QUOTA_RESULT_ORDER))

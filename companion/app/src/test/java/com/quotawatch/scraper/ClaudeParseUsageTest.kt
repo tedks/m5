@@ -138,7 +138,7 @@ class ClaudeParseUsageTest {
     private val claudeApi = JSONObject(fixture("claude_usage_api_projection_2026-11-12.json"))
 
     @Test
-    fun `claude today's json and panel text agree and the json wins`() {
+    fun `claude today's json and panel text disagree slightly and the json wins`() {
         val p = ClaudeScraper.parse(claudeInput(claudeNov, api = claudeApi))
         // Today's JSON says 62/66 while the fixture text (captured a few minutes earlier) says
         // 60/64: a real 2-point drift, so a warning per row is expected and the JSON is used.
@@ -308,5 +308,54 @@ class ClaudeParseUsageTest {
         val api2 = JSONObject().put("limits", org.json.JSONArray()
             .put(scoped("Claude", 99)).put(JSONObject().put("kind", "weekly_all").put("percent", 40)))
         assertEquals(40f, byName(ClaudeScraper.parse(claudeInput("", usageReady = false, api = api2)).results, "Claude wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude model with a null display name is no row`() {
+        // PR #28 council (anthropic I1). On Android, optString would turn this into "null".
+        val m = JSONObject().put("kind", "weekly_scoped").put("percent", 50)
+            .put("scope", JSONObject().put("model", JSONObject().put("display_name", JSONObject.NULL)).put("surface", JSONObject.NULL))
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(m)))).results
+        assertTrue(successes(r).isEmpty())
+        // A JVM test cannot reproduce Android's coercion; this pins that only a real string is read.
+        assertNull(byName(r, "null wk"))
+    }
+
+    @Test
+    fun `claude model-and-surface limit is not the model's weekly row`() {
+        // PR #28 council (anthropic I2c).
+        val withSurface = scoped("Fable", 80).also { it.getJSONObject("scope").put("surface", JSONObject().put("name", "Cowork")) }
+        val api = JSONObject().put("limits", org.json.JSONArray().put(withSurface).put(scoped("Fable", 30)))
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = api)).results
+        // Mutation-checked: the surface check removed -> red (80 would win as first).
+        assertEquals(30f, byName(r, "Fable wk")!!.quota.used, 0.001f)
+        // Twin: alone, the surface-scoped limit yields no Fable row at all.
+        val only = JSONObject().put("limits", org.json.JSONArray().put(withSurface))
+        assertNull(byName(ClaudeScraper.parse(claudeInput("", usageReady = false, api = only)).results, "Fable wk"))
+    }
+
+    @Test
+    fun `claude model rows are capped across json and text together`() {
+        // PR #28 council (anthropic N1).
+        val arr = org.json.JSONArray().put(JSONObject().put("kind", "weekly_all").put("percent", 5))
+        listOf("Aa", "Bb", "Cc", "Dd", "Ee").forEachIndexed { i, n -> arr.put(scoped(n, 10 + i)) }
+        val apiOnly = ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", arr))).results
+        // Mutation-checked: the union cap in parse removed -> red (5 rows).
+        assertEquals(4, successes(apiOnly).count { it.quota.name != "Claude wk" })
+        val text = listOf("Ff", "Gg", "Hh").joinToString("") { "$it\nUp to 50% of your weekly limit\n20% used\n" }
+        val both = ClaudeScraper.parse(claudeInput("Your usage\n$text", api = JSONObject().put("limits", arr))).results
+        // Mutation-checked: the union cap in parse removed -> red (7 model rows).
+        assertEquals(4, successes(both).count { it.quota.name != "Claude wk" })
+        assertTrue(successes(both).none { it.quota.name == "Ff wk" })
+    }
+
+    @Test
+    fun `row lines are never taken as a model name`() {
+        // PR #28 council (anthropic N4): a layout that drops the name line.
+        assertNull(ClaudeScraper.modelRowName("Resets Saturday 11 AM"))
+        assertNull(ClaudeScraper.modelRowName("Up to 50 of your weekly limit"))
+        // Twin: a model name starting with similar letters is still a name.
+        assertEquals("Reset wk", ClaudeScraper.modelRowName("Reset"))
+        assertEquals("Upton wk", ClaudeScraper.modelRowName("Upton"))
     }
 }

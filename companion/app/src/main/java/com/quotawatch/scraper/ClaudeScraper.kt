@@ -51,6 +51,9 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         fun modelRowName(label: String): String? {
             val clean = label.trim().replace(Regex("\\s+"), " ")
             if (clean.isEmpty() || !clean.matches(Regex("[A-Za-z][A-Za-z0-9 .\\-]*"))) return null
+            // Lines of the row itself are never a model name (a layout that drops the name line
+            // must not turn "Resets Saturday 11 AM" into a row).
+            if (Regex("^(?:resets|up to)\\b", RegexOption.IGNORE_CASE).containsMatchIn(clean)) return null
             return clean.take(MODEL_LABEL_MAX).trimEnd() + " wk"
         }
 
@@ -59,7 +62,8 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
          * on collisions: a wrist name produced by two different labels (e.g. "Claude Opus 4.5"
          * and "Claude Opus 4.6" both truncate to "Claude Opus wk"), or equal to the aggregate
          * rows' names, is omitted entirely, since the wrist could not say whose number it is.
-         * A label repeated verbatim keeps its first value. At most [MAX_MODEL_ROWS] rows.
+         * A label repeated verbatim keeps its first value. The row cap is applied in [parse], across
+         * both sources together.
          */
         internal fun modelRows(candidates: List<Pair<String, Double>>): LinkedHashMap<String, Double> {
             val labelsByName = LinkedHashMap<String, MutableSet<String>>()
@@ -72,7 +76,6 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             }
             val out = LinkedHashMap<String, Double>()
             for ((name, v) in first) {
-                if (out.size >= MAX_MODEL_ROWS) break
                 if (name == SESSION_NAME || name == WEEKLY_NAME) continue
                 if (labelsByName[name]!!.size > 1) continue
                 out[name] = v
@@ -157,9 +160,16 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                     when (l.optString("kind")) {
                         "session" -> if (SESSION_NAME !in out) out[SESSION_NAME] = v
                         "weekly_all" -> if (WEEKLY_NAME !in out) out[WEEKLY_NAME] = v
-                        "weekly_scoped" -> l.optJSONObject("scope")?.optJSONObject("model")
-                            ?.optString("display_name", "")?.takeIf { it.isNotBlank() }
-                            ?.let { scoped.add(it to v) }
+                        "weekly_scoped" -> {
+                            // Only a limit scoped to a model alone; a model-and-surface limit
+                            // (e.g. one model on one product) is a different quota.
+                            val scope = l.optJSONObject("scope")
+                            val surface = scope?.opt("surface")
+                            // `as? String`: Android's org.json turns a JSON null into "null"
+                            // through optString, which would become a row named "null wk".
+                            val name = scope?.optJSONObject("model")?.opt("display_name") as? String
+                            if ((surface == null || surface == JSONObject.NULL) && !name.isNullOrBlank()) scoped.add(name to v)
+                        }
                         else -> {}
                     }
                 }
@@ -189,7 +199,17 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
 
             val results = mutableListOf<QuotaResult>()
             val warnings = mutableListOf<String>()
-            val names = LinkedHashSet<String>().apply { addAll(api.keys); addAll(dom.keys) }
+            // Model rows are capped across both sources together (api first), not per source.
+            val names = LinkedHashSet<String>()
+            var models = 0
+            for (n in api.keys + dom.keys) {
+                if (n in names) continue
+                if (n != SESSION_NAME && n != WEEKLY_NAME) {
+                    if (models >= MAX_MODEL_ROWS) continue
+                    models++
+                }
+                names.add(n)
+            }
             for (name in names) {
                 val a = api[name]
                 val d = dom[name]
@@ -287,7 +307,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
 
     // Hands Kotlin the usage panel's text (parse() does the label-anchored extraction) and the
     // `limits` / `five_hour` / `seven_day` fields of the page's own usage JSON (CAPTURE_SCRIPT). Layout observed 2026-11-12
-    // (Ultra plan), as a dialog over /new#settings/usage:
+    // as a dialog over /new#settings/usage:
     //   Your usage / <plan> / <pace note>
     //   This week / Resets Saturday 11:00 AM / 60% used                               <- weekly
     //   Fable / Up to 50% of your weekly limit / Resets Saturday 11:00 AM / 64% used  <- model
@@ -310,7 +330,15 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                 var api = null;
                 var cap = window.${ResponseCapture.GLOBAL} && window.${ResponseCapture.GLOBAL}['$CAPTURE_KEY'];
                 if (cap && cap.body && typeof cap.body === 'object') {
-                    api = {limits: cap.body.limits || null, five_hour: cap.body.five_hour || null, seven_day: cap.body.seven_day || null};
+                    // Each limit is cut down to the fields parse() reads; ids, resets and any
+                    // future fields stay in the page.
+                    var lim = Array.isArray(cap.body.limits) ? cap.body.limits.map(function(l) {
+                        var sc = l && l.scope, m = sc && sc.model;
+                        return l && {kind: l.kind, percent: l.percent,
+                            scope: sc ? {model: m ? {display_name: m.display_name} : null, surface: sc.surface == null ? null : true} : null};
+                    }) : null;
+                    var fh = cap.body.five_hour, sd = cap.body.seven_day;
+                    api = {limits: lim, five_hour: fh ? {utilization: fh.utilization} : null, seven_day: sd ? {utilization: sd.utilization} : null};
                 }
                 return JSON.stringify({usageReady: usageReady, api: api, text: text.slice(0, 20000)});
             } catch(e) {
