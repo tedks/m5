@@ -20,6 +20,8 @@ package com.quotawatch.scraper
  *   response with no final URL (e.g. one a script constructed) is not captured.
  * - Each request is numbered when it starts; an older response finishing after a newer one has
  *   been kept is dropped, so overlapping requests cannot leave stale numbers behind.
+ * - A key that matched more than one distinct path keeps no body (`ambiguous`), so the
+ *   scrapers fall back to the rendered text rather than guess which response the page shows.
  * - Raw bodies stay in page memory. They contain account identifiers, so the poll JS must
  *   return only numeric fields and fixed labels — never a raw body — because the poll result
  *   is logged.
@@ -58,10 +60,18 @@ object ResponseCapture {
                 // it finally came from (after any redirect) is still same-origin and maps to the
                 // same key, and (b) no newer request for that key has already been kept, so an
                 // older response that finishes last cannot replace newer numbers.
-                var seq = 0;
+                // A key whose pattern has matched more than one distinct path (e.g. the usage of
+                // two different organizations) is ambiguous: which one the panel shows is
+                // unknown, so the key keeps no body at all and the scraper falls back to its
+                // label-anchored DOM extraction. Once ambiguous, it stays ambiguous.
+                var seq = 0, paths = {};
                 function keep(key, n, finalUrl, body) {
                     if (keyFor(finalUrl || '') !== key) return;
                     if (!body || typeof body !== 'object') return;
+                    var pn = new URL(finalUrl).pathname;
+                    var seen = paths[key] || (paths[key] = {});
+                    seen[pn] = true;
+                    if (Object.keys(seen).length > 1) { cap[key] = {at: Date.now(), ambiguous: true}; return; }
                     var prev = cap[key];
                     if (prev && prev.n > n) return;
                     cap[key] = {at: Date.now(), n: n, body: body};
@@ -76,7 +86,9 @@ object ResponseCapture {
                             if (key) {
                                 var n = ++seq;
                                 pr.then(function(r) {
-                                    if (r && r.ok) r.clone().json().then(function(j) { keep(key, n, r.url, j); }, function() {});
+                                    try {
+                                        if (r && r.ok) r.clone().json().then(function(j) { try { keep(key, n, r.url, j); } catch (e) {} }, function() {});
+                                    } catch (e) {}
                                 }, function() {});
                             }
                         } catch (e) {}
