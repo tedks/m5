@@ -1,0 +1,22 @@
+id: m5-settle
+title: Scraper settle check compares the whole page text
+desc: 'From the PR #27 council (anthropic N4): UsageScraper.decidePoll''s stability
+  test compares the whole poll payload, which now includes up to 20 KB of page text.
+  Any text that ticks (a seconds countdown, a rotating tip, an animated counter) delays
+  or prevents settling, and the timeout path then returns an unsettled result. Today''s
+  Codex and Claude pages tick once a minute, so this is fine for now. Fix: settle
+  on the parsed quota map (name -> value, source) instead of the raw payload, or have
+  the JS return only label-anchored snippets.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:58:56-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:58:56-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
