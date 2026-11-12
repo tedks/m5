@@ -53,3 +53,15 @@ log_events:
     there, focus on the M5/cable/adapter; if it also fails at descriptor reads, focus
     on the port/hub path. Separately check whether the M5 shows power, and use the
     same M5+cable+adapter on another computer only as a later control if needed.'
+- time: 2026-11-12T21:48:15-00:00
+  who: Ted Smith
+  what: commented
+  comment: '2026-11-12 control: the same M5, cable, and adapter enumerated on another
+    Ubuntu 24.04.5 desktop as FTDI 0403:6001 (Product M5stack) and created ttyUSB0.
+    On framework0, reset and reconnect produced the same descriptor-read -110 timeout
+    and no serial node. The failing path is behind a Realtek 0bda:5424 USB 2.0 hub;
+    the working host uses a different USB controller and hub chain. This shifts the
+    diagnosis toward a framework0 USB path/compatibility issue rather than an M5 firmware
+    lockup. Exact cause is not yet isolated. Next targeted test: an existing USB 2.0
+    hub or USB-C dock with USB-A downstream port on framework0, if available; no device
+    write before enumeration and owner approval.'
