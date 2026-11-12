@@ -19,7 +19,13 @@ sealed class QuotaResult {
         val quota: Quota,
         val fetchedAt: Long = System.currentTimeMillis(),
         /** Where the number came from, for logs: "api" (the page's own JSON) or "dom". */
-        val source: String? = null
+        val source: String? = null,
+        /**
+         * True when this service's fresh rows came with the page's complete list of its quotas
+         * (e.g. Claude's `limits` array), so a quota missing from this round is gone, not late.
+         * See [mergedWith].
+         */
+        val completeSet: Boolean = false
     ) : QuotaResult()
 
     data class Error(override val service: String, val message: String) : QuotaResult()
@@ -118,8 +124,8 @@ data class QuotaSnapshot(
  *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
  *    payload must never present deliberately-unavailable data as if it were live — showing
  *    hour-old numbers under a "logged out" service reads as current and misleads.
- *  - If any fresh Success for the service came from the page's own JSON (`source == "api"`), that
- *    list is the page's complete current set: a quota missing from it is gone (e.g. a per-model
+ *  - If any fresh Success for the service is marked [QuotaResult.Success.completeSet] (it came with
+ *    the page's complete list of that service's quotas), that list is the complete current set: a quota missing from it is gone (e.g. a per-model
  *    row whose model left the plan, or a row whose name changed), so nothing is retained for that
  *    service. Retention exists for partial settles of the rendered text, not for this.
  *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
@@ -140,8 +146,8 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
         .map { it.service }
         .toSet()
 
-    // Services whose fresh rows came from the page's own JSON: their row set is complete.
-    val completeServices = successes.filter { it.source == "api" }.map { it.service }.toSet()
+    // Services whose fresh rows came with the page's complete quota list.
+    val completeServices = successes.filter { it.completeSet }.map { it.service }.toSet()
 
     val retainedStale = previous.successes
         .filter { (it.service to it.quota.name) !in freshSuccessKeys }

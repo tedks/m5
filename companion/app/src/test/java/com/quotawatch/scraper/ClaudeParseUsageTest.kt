@@ -358,4 +358,40 @@ class ClaudeParseUsageTest {
         assertEquals("Reset wk", ClaudeScraper.modelRowName("Reset"))
         assertEquals("Upton wk", ClaudeScraper.modelRowName("Upton"))
     }
+
+    @Test
+    fun `claude model names colliding across json and text are omitted`() {
+        // PR #28 council round ff11613b28fc (openai): JSON says 4.5, text says 4.6.
+        val api = JSONObject().put("limits", org.json.JSONArray().put(scoped("Claude Opus 4.5", 10)))
+        val text = "Your usage\nClaude Opus 4.6\nUp to 50% of your weekly limit\n90% used\n"
+        val r = ClaudeScraper.parse(claudeInput(text, api = api)).results
+        // Mutation-checked: labels collected per source again -> red.
+        assertNull(byName(r, "Claude Opus wk"))
+        // Twin: the same label in both sources is one row (api wins).
+        val same = ClaudeScraper.parse(claudeInput(text.replace("4.6", "4.5"), api = api)).results
+        assertEquals(10f, byName(same, "Claude Opus wk")!!.quota.used, 0.001f)
+    }
+
+    @Test
+    fun `claude rows are a complete set only when the json carried its limits list`() {
+        val withLimits = ClaudeScraper.parse(claudeInput("", usageReady = false, api = claudeApi)).results
+        assertTrue(successes(withLimits).all { it.completeSet })
+        // Only seven_day, no limits list: an api value, but not a complete set.
+        val legacy = JSONObject().put("limits", JSONObject.NULL).put("seven_day", JSONObject().put("utilization", 40))
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = legacy)).results
+        assertEquals("api", byName(r, "Claude wk")!!.source)
+        // Mutation-checked: complete = true regardless of limits -> red.
+        assertTrue(successes(r).none { it.completeSet })
+    }
+
+    @Test
+    fun `claude surface as projected by the page js excludes the model row`() {
+        // JS_EXTRACT emits surface: true for any present surface (round ff11613b28fc nit).
+        val s = scoped("Fable", 80).also { it.getJSONObject("scope").put("surface", true) }
+        val r = ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(s)))).results
+        assertNull(byName(r, "Fable wk"))
+        // Twin: surface null, as the JS emits for a plain model limit, is read.
+        val plain = scoped("Fable", 80).also { it.getJSONObject("scope").put("surface", JSONObject.NULL) }
+        assertEquals(80f, byName(ClaudeScraper.parse(claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray().put(plain)))).results, "Fable wk")!!.quota.used, 0.001f)
+    }
 }

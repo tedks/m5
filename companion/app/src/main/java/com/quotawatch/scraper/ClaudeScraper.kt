@@ -65,23 +65,38 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
          * A label repeated verbatim keeps its first value. The row cap is applied in [parse], across
          * both sources together.
          */
-        internal fun modelRows(candidates: List<Pair<String, Double>>): LinkedHashMap<String, Double> {
+        internal fun modelRows(
+            api: List<Pair<String, Double>>,
+            dom: List<Pair<String, Double>>
+        ): LinkedHashMap<String, Pair<Double?, Double?>> {
+            // Collisions are judged over the labels of BOTH sources: the JSON naming "Claude Opus
+            // 4.5" and the text naming "Claude Opus 4.6" is just as ambiguous as either alone.
             val labelsByName = LinkedHashMap<String, MutableSet<String>>()
-            val first = LinkedHashMap<String, Double>()
-            for ((label, v) in candidates) {
-                val name = modelRowName(label) ?: continue
-                val key = label.trim().replace(Regex("\\s+"), " ")
-                labelsByName.getOrPut(name) { LinkedHashSet() }.add(key)
-                if (name !in first) first[name] = v
+            val apiFirst = LinkedHashMap<String, Double>()
+            val domFirst = LinkedHashMap<String, Double>()
+            for ((cands, first) in listOf(api to apiFirst, dom to domFirst)) {
+                for ((label, v) in cands) {
+                    val name = modelRowName(label) ?: continue
+                    labelsByName.getOrPut(name) { LinkedHashSet() }.add(label.trim().replace(Regex("\\s+"), " "))
+                    if (name !in first) first[name] = v
+                }
             }
-            val out = LinkedHashMap<String, Double>()
-            for ((name, v) in first) {
+            val out = LinkedHashMap<String, Pair<Double?, Double?>>()
+            for (name in labelsByName.keys) {
                 if (name == SESSION_NAME || name == WEEKLY_NAME) continue
                 if (labelsByName[name]!!.size > 1) continue
-                out[name] = v
+                out[name] = apiFirst[name] to domFirst[name]
             }
             return out
         }
+
+        /** One source's values: the aggregate rows by name, plus raw per-model (label, value). */
+        internal data class Extract(
+            val values: LinkedHashMap<String, Double>,
+            val models: List<Pair<String, Double>>,
+            /** The page's JSON carried its `limits` list, so its row set is complete. */
+            val complete: Boolean = false
+        )
 
         // Label-anchored patterns over the usage panel text. Each row is line-structured: its
         // label line, then only "decoration" lines (a "Resets ..." line, or a line of icon glyphs
@@ -116,7 +131,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         private fun pctOrNull(s: String?): Double? = s?.toDoubleOrNull()?.takeIf { it in 0.0..100.0 }
 
         /** Quota name -> used percent from the usage panel text, in display order. */
-        internal fun domValues(text: String): LinkedHashMap<String, Double> {
+        internal fun domValues(text: String): Extract {
             val out = LinkedHashMap<String, Double>()
             pctOrNull(DOM_SESSION.find(text)?.groupValues?.get(1))?.let { out[SESSION_NAME] = it }
             val weekly = DOM_WEEKLY_OLD.find(text) ?: DOM_WEEKLY.find(text)
@@ -124,8 +139,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             val candidates = DOM_MODEL.findAll(text).mapNotNull { m ->
                 pctOrNull(m.groupValues[2])?.let { m.groupValues[1] to it }
             }.toList()
-            out.putAll(modelRows(candidates))
-            return out
+            return Extract(out, candidates)
         }
 
         /** Capture key for the page's own usage request (see ResponseCapture). */
@@ -148,9 +162,9 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
          * rather than shown under a guessed name. The older `five_hour.utilization` /
          * `seven_day.utilization` fields fill in only what `limits` did not provide.
          */
-        internal fun apiValues(api: JSONObject?): LinkedHashMap<String, Double> {
+        internal fun apiValues(api: JSONObject?): Extract {
             val out = LinkedHashMap<String, Double>()
-            if (api == null) return out
+            if (api == null) return Extract(out, emptyList())
             val limits = api.optJSONArray("limits")
             val scoped = mutableListOf<Pair<String, Double>>()
             if (limits != null) {
@@ -176,8 +190,7 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
             }
             if (SESSION_NAME !in out) pct(api.optJSONObject("five_hour")?.opt("utilization"))?.let { out[SESSION_NAME] = it }
             if (WEEKLY_NAME !in out) pct(api.optJSONObject("seven_day")?.opt("utilization"))?.let { out[WEEKLY_NAME] = it }
-            out.putAll(modelRows(scoped))
-            return out
+            return Extract(out, scoped, complete = limits != null)
         }
 
         /**
@@ -199,25 +212,19 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
 
             val results = mutableListOf<QuotaResult>()
             val warnings = mutableListOf<String>()
-            // Model rows are capped across both sources together (api first), not per source.
-            val names = LinkedHashSet<String>()
-            var models = 0
-            for (n in api.keys + dom.keys) {
-                if (n in names) continue
-                if (n != SESSION_NAME && n != WEEKLY_NAME) {
-                    if (models >= MAX_MODEL_ROWS) continue
-                    models++
-                }
-                names.add(n)
-            }
+            // Aggregate rows first, then model rows; model rows are capped across both sources
+            // together (in page-JSON order, then text order).
+            val models = modelRows(api.models, dom.models)
+            val names = LinkedHashSet<String>().apply { addAll(api.values.keys); addAll(dom.values.keys) }
+            models.keys.take(MAX_MODEL_ROWS).forEach { names.add(it) }
             for (name in names) {
-                val a = api[name]
-                val d = dom[name]
+                val a = api.values[name] ?: models[name]?.first
+                val d = dom.values[name] ?: models[name]?.second
                 if (a != null && d != null && kotlin.math.abs(a - d) > CROSS_CHECK_TOLERANCE) {
                     warnings.add("$name: api=$a dom=$d disagree; using api")
                 }
                 val (v, src) = if (a != null) a to "api" else d!! to "dom"
-                results.add(QuotaResult.Success(SERVICE, Quota(name, v.toFloat(), 100f, "%"), source = src))
+                results.add(QuotaResult.Success(SERVICE, Quota(name, v.toFloat(), 100f, "%"), source = src, completeSet = api.complete))
             }
 
             if (results.isEmpty()) {

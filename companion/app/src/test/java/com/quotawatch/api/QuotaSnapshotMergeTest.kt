@@ -294,10 +294,10 @@ class QuotaSnapshotMergeTest {
     }
 
     private fun api(service: String, name: String, fetchedAt: Long) =
-        QuotaResult.Success(service, Quota(name, 10f, 100f, "%"), fetchedAt, source = "api")
+        QuotaResult.Success(service, Quota(name, 10f, 100f, "%"), fetchedAt, source = "api", completeSet = true)
 
     @Test
-    fun `a row missing from a fresh page-json set is gone, not retained`() {
+    fun `a row missing from a fresh complete set is gone, not retained`() {
         // PR #28 council (anthropic I3): a per-model row whose model left the plan must not
         // linger for up to MAX_STALE_MS beside fresh rows.
         val now = 1_000_000L
@@ -319,5 +319,16 @@ class QuotaSnapshotMergeTest {
         // And a page-json set for ANOTHER service does not stop this service's retention.
         val mixed = QuotaSnapshot(fresh.results + api("codex", "Codex wk", now), now).mergedWith(previous, now)
         assertTrue(mixed.successes.any { it.quota.name == "Fable wk" })
+    }
+
+    @Test
+    fun `a page-json row that is not a complete set keeps retention`() {
+        // PR #28 council round ff11613b28fc (openai): one api value (e.g. only seven_day, no
+        // limits list) proves nothing about the other rows.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(listOf(api("claude", "Claude wk", now - 5_000), api("claude", "Fable wk", now - 5_000)), now - 5_000)
+        val fresh = QuotaSnapshot(listOf(QuotaResult.Success("claude", Quota("Claude wk", 10f, 100f, "%"), now, source = "api")), now)
+        // Mutation-checked: completeServices keyed on source == "api" again -> red.
+        assertTrue(fresh.mergedWith(previous, now).successes.any { it.quota.name == "Fable wk" })
     }
 }
