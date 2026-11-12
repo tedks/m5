@@ -43,3 +43,13 @@ log_events:
     Next discriminator: a data-capable USB-C cable on a direct port; if that also
     fails, step back to an independent cable/device control rather than repeating
     port variants.'
+- time: 2026-11-12T21:39:30-00:00
+  who: Ted Smith
+  what: commented
+  comment: 'Correction to my prior next-test note: a direct C-to-C connection may
+    produce no kernel event if this M5 lacks the USB-C attach resistors; that outcome
+    would be uninformative about device health. The preferred next control is a known
+    low/full-speed USB input device in the same rear USB-A port. If it enumerates
+    there, focus on the M5/cable/adapter; if it also fails at descriptor reads, focus
+    on the port/hub path. Separately check whether the M5 shows power, and use the
+    same M5+cable+adapter on another computer only as a later control if needed.'
