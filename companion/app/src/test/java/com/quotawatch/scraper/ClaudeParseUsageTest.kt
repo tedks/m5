@@ -3,6 +3,7 @@ package com.quotawatch.scraper
 import com.quotawatch.api.QuotaResult
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -451,5 +452,42 @@ class ClaudeParseUsageTest {
         // Mutation-checked: lowercase() dropped from the name key -> red (two rows).
         assertEquals(listOf("Fable wk"), successes(r).map { it.quota.name })
         assertEquals("api", successes(r).single().source)
+    }
+
+    // PR #28 council round 8ffc7308d2c1 (openai seat).
+
+    @Test
+    fun `claude empty complete list settles the scrape instead of timing out`() {
+        val empty = claudeInput("", usageReady = false, api = JSONObject().put("limits", org.json.JSONArray()))
+        // Mutation-checked: isSettled back to Success-only -> red.
+        assertTrue(ClaudeScraper.isSettled(empty))
+        // Twin: nothing at all is not settled.
+        assertFalse(ClaudeScraper.isSettled(claudeInput("", usageReady = false)))
+    }
+
+    @Test
+    fun `claude known kind with an unreadable value does not suppress the text`() {
+        val api = JSONObject().put("limits", org.json.JSONArray().put(JSONObject().put("kind", "weekly_all").put("percent", JSONObject.NULL)))
+        val r = ClaudeScraper.parse(claudeInput(fableText, api = api)).results
+        // Mutation-checked: an unreadable percent leaves `understood` true -> red.
+        val wk = byName(r, "Claude wk")!!
+        assertEquals(40f, wk.quota.used, 0.001f)
+        assertEquals("dom", wk.source)
+        // Twin: a readable percent is the api value, and the list is complete.
+        val ok = JSONObject().put("limits", org.json.JSONArray().put(JSONObject().put("kind", "weekly_all").put("percent", 41)))
+        val r2 = ClaudeScraper.parse(claudeInput(fableText, api = ok)).results
+        assertEquals("api", byName(r2, "Claude wk")!!.source)
+        assertNull(byName(r2, "Fable wk"))
+    }
+
+    @Test
+    fun `claude scoped limit without a model name lets the text supply the row`() {
+        val m = JSONObject().put("kind", "weekly_scoped").put("percent", 70)
+            .put("scope", JSONObject().put("model", JSONObject().put("display_name", JSONObject.NULL)).put("surface", JSONObject.NULL))
+        val api = JSONObject().put("limits", org.json.JSONArray().put(JSONObject().put("kind", "weekly_all").put("percent", 40)).put(m))
+        val r = ClaudeScraper.parse(claudeInput(fableText, api = api)).results
+        // Mutation-checked: a blank name leaves `understood` true -> red.
+        assertEquals(70f, byName(r, "Fable wk")!!.quota.used, 0.001f)
+        assertEquals("dom", byName(r, "Fable wk")!!.source)
     }
 }

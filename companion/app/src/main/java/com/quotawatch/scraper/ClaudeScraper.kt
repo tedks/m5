@@ -36,10 +36,11 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
         // Disagreement (percentage points) between api and dom above which a warning is logged.
         private const val CROSS_CHECK_TOLERANCE = 1.0
 
-        // Settled once any weekly or session value is present (from either source); the poll
-        // loop's stable-twice check and grace window wait out the rest of the panel rendering.
-        private fun isSettled(raw: String): Boolean = try {
-            parse(raw).results.any { it is QuotaResult.Success }
+        // Settled once any weekly or session value is present (from either source), or the page's
+        // complete list says there is none (Unavailable); the poll loop's stable-twice check and
+        // grace window wait out the rest of the panel rendering.
+        internal fun isSettled(raw: String): Boolean = try {
+            parse(raw).results.any { it is QuotaResult.Success || it is QuotaResult.Unavailable }
         } catch (e: Exception) {
             false
         }
@@ -186,7 +187,10 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                 for (i in 0 until limits.length()) {
                     val l = limits.optJSONObject(i)
                     if (l == null || l.optString("kind") !in KNOWN_KINDS) { understood = false; continue }
-                    val v = pct(l.opt("percent")) ?: continue
+                    // An entry of a known kind whose value cannot be read is not understood either:
+                    // the list is then not complete, and the text may still supply that row.
+                    val v = pct(l.opt("percent"))
+                    if (v == null) { understood = false; continue }
                     when (l.optString("kind")) {
                         "session" -> if (SESSION_NAME !in out) out[SESSION_NAME] = v
                         "weekly_all" -> if (WEEKLY_NAME !in out) out[WEEKLY_NAME] = v
@@ -198,7 +202,11 @@ class ClaudeScraper(contextProvider: () -> Context, private val sessionStore: Se
                             // `as? String`: Android's org.json turns a JSON null into "null"
                             // through optString, which would become a row named "null wk".
                             val name = scope?.optJSONObject("model")?.opt("display_name") as? String
-                            if ((surface == null || surface == JSONObject.NULL) && !name.isNullOrBlank()) scoped.add(name to v)
+                            when {
+                                surface != null && surface != JSONObject.NULL -> {} // deliberately not a row
+                                name.isNullOrBlank() -> understood = false
+                                else -> scoped.add(name to v)
+                            }
                         }
                         else -> {}
                     }
