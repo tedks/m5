@@ -65,3 +65,11 @@ log_events:
     lockup. Exact cause is not yet isolated. Next targeted test: an existing USB 2.0
     hub or USB-C dock with USB-A downstream port on framework0, if available; no device
     write before enumeration and owner approval.'
+- time: 2026-11-12T21:50:43-00:00
+  who: Ted Smith
+  what: commented
+  comment: '2026-11-12: A front USB-C host port with a USB-A adapter and the known
+    working A-to-C cable enumerated the M5 on framework0 as FTDI 0403:6001 and created
+    /dev/ttyUSB0. Read-only Nix esptool calls identified the expected ESP32-PICO-D4
+    rev v1.1 and 4MB flash. The rear USB-A path remains the isolated failure. Firmware
+    from current main is built; awaiting explicit owner approval before flashing.'
