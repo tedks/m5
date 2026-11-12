@@ -1,0 +1,22 @@
+id: m5-env-precision
+title: Clarify dev-shell path and adb troubleshooting edge cases
+desc: 'Follow-up from PR #23 council round 2: document that the shell hook resolves
+  the current directory git repository when nix develop is invoked by path from elsewhere;
+  consider submodule behavior; distinguish secrets outside a bare worktree from /secrets/
+  ignored in a plain clone; and make the last-resort adb-server troubleshooting text
+  require checking other users before restart. Non-blocking because documented use
+  invokes the shell from this project worktree, submodule handling is a silent no-op,
+  and current task does not restart adb.'
+type: task
+component: docs
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T21:16:23-00:00
+references: []
+log_events:
+- time: 2026-11-12T21:16:23-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
