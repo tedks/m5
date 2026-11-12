@@ -1,0 +1,22 @@
+id: m5-retcase
+title: Retention keys quota names case-sensitively
+desc: 'From the PR #28 council (anthropic, round 8ffc7308d2c1, N2): mergedWith keys
+  retention on the exact (service, quota.name). ClaudeScraper now treats model names
+  case-insensitively across sources, showing the JSON''s spelling. If one round shows
+  ''Fable wk'' from the JSON and the next has no JSON while the panel text renders
+  ''FABLE'' (CSS text-transform), the fresh ''FABLE wk'' and the retained ''Fable
+  wk'' could sit side by side for up to MAX_STALE_MS. Not seen today. Fix: a case-insensitive
+  retention key.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-12T22:22:00-00:00
+references: []
+log_events:
+- time: 2026-11-12T22:22:00-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
