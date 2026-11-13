@@ -1,0 +1,20 @@
+id: m5-errecho
+title: 'Scraper error paths: don''t echo page text from JSON parse failures'
+desc: 'council #27 r3 nit N1 (anthropic): Codex/Claude fetchUsage catch logs Log.e(TAG,
+  ''Scrape failed'', e) and returns e.message as the Error text. org.json syntaxError
+  embeds the whole input, which is now up to 20 KB of page text. Unreachable today
+  (the JS always returns JSON.stringify), but log only e.javaClass.simpleName and
+  use a fixed message for parse failures.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T03:55:42-00:00
+references: []
+log_events:
+- time: 2026-11-13T03:55:42-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
