@@ -1,0 +1,18 @@
+id: m5-optint
+title: 'Codex: window length must be an exact integer (optInt truncates)'
+desc: 'council #27 r3 nit (openai A-N7): apiValues reads limit_window_seconds with
+  optInt, so 604800.9 truncates to 604800 and is named wk. Require an integral number
+  before mapping. Not seen in real payloads.'
+type: task
+component: companion
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T03:56:06-00:00
+references: []
+log_events:
+- time: 2026-11-13T03:56:06-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
