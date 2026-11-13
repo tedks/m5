@@ -1,0 +1,23 @@
+id: m5-q-adb-keys
+title: Keep the tower0 adb key copy, and revoke stray phone authorizations?
+desc: 'Context: secrets/adb holds an adb key copied from tower0 at the owner''s request;
+  the dev shell offers it via ADB_VENDOR_KEYS. The phone is verified to trust framework0''s
+  own ~/.android/adbkey; trust of the tower0 key is unproven. During testing on 2026-11-12
+  several throwaway keys prompted on the phone (private keys since deleted); some
+  may have been approved. Options: (A) on the phone, Revoke USB debugging authorizations
+  and re-approve framework0 only, and delete the tower0 copy; (B) leave as is. Recommendation
+  (CTO): A when convenient; tell the scrape lane first (brief adb disconnect). Decides:
+  Ted. Blocks: nothing.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T08:29:35-00:00
+references: []
+log_events:
+- time: 2026-11-13T08:29:35-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
