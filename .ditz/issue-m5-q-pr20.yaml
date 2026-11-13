@@ -1,0 +1,21 @@
+id: m5-q-pr20
+title: 'Disposition of PR #20 (workflow_dispatch for Build APK)'
+desc: 'Context: PR #20 has been open since 2026-09-06 and was not touched in the 2026-11-12
+  refresh. It only adds a manual trigger to the release workflow. Whether Actions
+  billing is still locked is unknown; pushes to main on 2026-11-12/13 will have triggered
+  the release workflow. Options: (A) merge after a light review; (B) close. Recommendation
+  (CTO): A if you still want the latest-prerelease APK from Actions. Related: m5-pio-release
+  (release builds pip-install an unpinned PlatformIO). Decides: Ted. Blocks: nothing.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T08:29:35-00:00
+references: []
+log_events:
+- time: 2026-11-13T08:29:35-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
