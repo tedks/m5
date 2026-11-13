@@ -1,0 +1,21 @@
+id: m5-q-actions-quota
+title: Keep the GitHub Actions quota on the wrist?
+desc: 'Context: the GitHub token on the phone has returned 401 since July 2026 and
+  Actions CI is off on the owner''s repos since 2026-09-13, so the Actions row shows
+  nothing. Options: (A) remove the Actions quota from the app and wrist; (B) issue
+  a new classic PAT with user scope and keep it (deploy/release minutes still accrue).
+  Recommendation (CTO): A unless release-workflow minutes matter to you. Decides:
+  Ted. Blocks: nothing. Source: scrape lane survey, 2026-11-12.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T08:29:35-00:00
+references: []
+log_events:
+- time: 2026-11-13T08:29:35-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
