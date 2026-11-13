@@ -17,68 +17,128 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
 
     companion object {
         const val TAG = "CodexScraper"
-        const val USAGE_URL = "https://chatgpt.com/codex/cloud/settings/usage"
+        // The old /codex/cloud/settings/usage URL now client-redirects here (observed 2026-11-12).
+        const val USAGE_URL = "https://chatgpt.com/settings/usage"
         const val ORIGIN = "https://chatgpt.com"
         const val SERVICE = "codex"
 
-        // ~1s at UsageScraper.POLL_INTERVAL_MS (500ms) — bounded extra polling after `weekly`
-        // settles, in case the optional 5h section (bd m5-u1d) renders a beat later and would
-        // otherwise be missed by finalizing the instant weekly alone goes stable. Bounded: never
-        // waits past this many extra ticks, and never turns "5h didn't show up in time" into an
-        // error — see UsageScraper.decidePoll.
-        private const val FIVE_HOUR_GRACE_POLLS = 2
+        // ~1s at UsageScraper.POLL_INTERVAL_MS (500ms) of extra polling after the first settle,
+        // so a value that arrives a beat later (the page's usage JSON after the DOM, or the
+        // optional 5h block, bd m5-u1d) is still picked up. Bounded; see UsageScraper.decidePoll.
+        private const val GRACE_POLLS = 2
 
-        // This account's chatgpt.com/codex/cloud/settings/usage page (verified live 2026-07-17)
-        // shows a "Weekly usage limit ... N% remaining" block plus Balance / per-model breakdowns.
-        // OpenAI temporarily removed the "5 hour usage limit" section for Plus/Pro/Business on
-        // 2026-07-13 (bd m5-u1d) — it's expected to return, so the extraction JS still looks for
-        // it (bounded-gap regex, same style as weekly) but we settle on weekly alone: the 5h
-        // section may legitimately not exist right now, and gating settle on it would poll the
-        // full timeout on every scrape while the removal holds. When 5h does render on the SAME
-        // tick weekly settles, the ordinary valid-and-stable poll picks it up with no extra
-        // handling. When it renders a beat LATER than weekly (a real race — see UsageScraper's
-        // decidePoll), FIVE_HOUR_GRACE_POLLS gives it a short bounded window to show up before we
-        // finalize on weekly alone.
+        /** Capture key for the page's own usage request (see ResponseCapture). */
+        const val CAPTURE_KEY = "codexUsage"
+
+        // The usage page fetches GET /backend-api/wham/usage itself (observed 2026-11-12, see the
+        // capability survey on m5-scr). Its rate_limit.{primary,secondary}_window objects carry
+        // used_percent and limit_window_seconds.
+        val CAPTURE_SCRIPT = ResponseCapture.hookScript(mapOf(CAPTURE_KEY to "^/backend-api/wham/usage$"))
+
+        // Window lengths we know how to name. Any other window length is ignored (never shown
+        // under a guessed name).
+        private const val WEEK_SECONDS = 7 * 24 * 3600
+        private const val FIVE_HOUR_SECONDS = 5 * 3600
+        const val WEEKLY_NAME = "Codex wk"
+        const val FIVE_HOUR_NAME = "Codex 5h"
+
+        // Disagreement (in percentage points) between the API value and the rendered text above
+        // which a warning is logged. The page rounds what it renders, so allow 1 point.
+        private const val CROSS_CHECK_TOLERANCE = 1.0
+
         private fun isSettled(raw: String): Boolean = try {
-            val json = JSONObject(raw)
-            json.optDouble("weeklyRemaining", -1.0) >= 0
+            val parsed = parse(raw)
+            parsed.results.any { it is QuotaResult.Success && it.quota.name == WEEKLY_NAME }
         } catch (e: Exception) {
             false
         }
 
+        // Label-anchored DOM patterns, applied in Kotlin to the page text. Today (2026-11-12):
+        // "Weekly limit / Resets in 5d 23h / 85% left"; older: "Weekly usage limit ... N%
+        // remaining". Each value must follow its OWN label within a bounded gap, and the gap may
+        // not cross a '%' or the word "limit": otherwise a label with no value of its own (or a
+        // value in another unit, like "30% used") would borrow the next quota's number.
+        private const val GAP = """(?:(?!limit|%)[\s\S]){0,80}?"""
+        private const val PCT_LEFT = """(\d+(?:\.\d+)?)\s*%\s*(?:left|remaining)"""
+        private val DOM_WEEKLY = Regex(
+            """(?:^|\n)[ \t]*weekly\s*(?:usage\s*)?limit$GAP$PCT_LEFT""",
+            RegexOption.IGNORE_CASE
+        )
+        // Labels must start a line, as the real ones do; the reset blurb ("Use a reset to restore
+        // your 5-hour limit, weekly limit, or both") names both mid-sentence. "5-hour", "5 hour",
+        // "5hour" match; "25-hour" does not.
+        private val DOM_FIVE_HOUR = Regex(
+            """(?:^|\n)[ \t]*5[\s-]*hour\s*(?:usage\s*)?limit$GAP$PCT_LEFT""",
+            RegexOption.IGNORE_CASE
+        )
+
+        data class Parsed(val results: List<QuotaResult>, val warnings: List<String>)
+
+        /** [parse] without the warnings. */
+        fun parseUsage(data: String): List<QuotaResult> = parse(data).results
+
+        /** Used-percent per known window from the page's `rate_limit` object (wham/usage). */
+        internal fun apiValues(rateLimit: JSONObject?): Map<String, Double> {
+            val out = LinkedHashMap<String, Double>()
+            if (rateLimit == null) return out
+            for (key in listOf("primary_window", "secondary_window")) {
+                val w = rateLimit.optJSONObject(key) ?: continue
+                val name = when (w.optInt("limit_window_seconds", -1)) {
+                    WEEK_SECONDS -> WEEKLY_NAME
+                    FIVE_HOUR_SECONDS -> FIVE_HOUR_NAME
+                    else -> null
+                } ?: continue
+                val used = w.optDouble("used_percent", Double.NaN)
+                if (used in 0.0..100.0 && name !in out) out[name] = used
+            }
+            return out
+        }
+
+        /** Used-percent per quota from the rendered page text (the page shows percent LEFT). */
+        internal fun domValues(text: String): Map<String, Double> {
+            val out = LinkedHashMap<String, Double>()
+            DOM_WEEKLY.find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+                ?.takeIf { it in 0.0..100.0 }?.let { out[WEEKLY_NAME] = 100.0 - it }
+            DOM_FIVE_HOUR.find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+                ?.takeIf { it in 0.0..100.0 }?.let { out[FIVE_HOUR_NAME] = 100.0 - it }
+            return out
+        }
+
         /**
-         * Map the extraction JSON to quota results. Pure (no Android deps) so it's unit-testable.
-         * The page reports "N% remaining"; we convert to used (100 - remaining). Only values
-         * anchored to their labels ("Weekly usage limit" / "5 hour usage limit") reach here.
-         * Weekly missing is an honest error (PR2 retains last-known-good numbers on error); 5h
-         * missing is silently omitted — it's a deliberately optional section right now, not a
-         * failure (bd m5-u1d).
+         * Map the extraction JSON (see JS_EXTRACT) to quota results. Pure, so it is unit-tested.
+         *
+         * Input: {"api": null | {"rate_limit": <the page's wham/usage rate_limit object>},
+         *         "text": <page innerText>}.
+         *
+         * The page's own JSON wins per quota; the label-anchored text is the fallback for any
+         * quota the JSON did not provide. If both exist and differ by more than
+         * [CROSS_CHECK_TOLERANCE] the API value is kept and a warning returned. Values outside
+         * 0..100 and windows of unknown length are absent, never guessed. Weekly missing from both
+         * is an honest error; 5h missing is silently omitted (optional, bd m5-u1d).
          */
-        fun parseUsage(data: String): List<QuotaResult> {
+        fun parse(data: String): Parsed {
             val json = JSONObject(data)
             if (json.has("error")) {
-                return listOf(QuotaResult.Error("codex", json.getString("error")))
+                return Parsed(listOf(QuotaResult.Error(SERVICE, json.getString("error"))), emptyList())
             }
+            val api = apiValues(json.optJSONObject("api")?.optJSONObject("rate_limit"))
+            val dom = domValues(json.optString("text", ""))
 
             val results = mutableListOf<QuotaResult>()
-
-            // Weekly is the required quota — missing it is always an honest error, even if the
-            // (optional) 5h section happened to parse. Keying "did we fail" off results.isEmpty()
-            // would let a present 5h value silently mask a broken weekly regex.
-            val weeklyRemaining = json.optDouble("weeklyRemaining", -1.0)
-            if (weeklyRemaining in 0.0..100.0) {
-                results.add(QuotaResult.Success("codex", Quota("Codex wk", (100.0 - weeklyRemaining).toFloat(), 100f, "%")))
-            } else {
-                results.add(QuotaResult.Error("codex", "Weekly usage limit not found on page"))
+            val warnings = mutableListOf<String>()
+            for (name in listOf(WEEKLY_NAME, FIVE_HOUR_NAME)) {
+                val a = api[name]
+                val d = dom[name]
+                if (a != null && d != null && kotlin.math.abs(a - d) > CROSS_CHECK_TOLERANCE) {
+                    warnings.add("$name: api=$a dom=$d disagree; using api")
+                }
+                when {
+                    a != null -> results.add(QuotaResult.Success(SERVICE, Quota(name, a.toFloat(), 100f, "%"), source = "api"))
+                    d != null -> results.add(QuotaResult.Success(SERVICE, Quota(name, d.toFloat(), 100f, "%"), source = "dom"))
+                    name == WEEKLY_NAME -> results.add(QuotaResult.Error(SERVICE, "Weekly usage limit not found on page"))
+                }
             }
-
-            // 5h is optional right now (bd m5-u1d) — present it when found, otherwise say nothing.
-            val fiveHourRemaining = json.optDouble("fiveHourRemaining", -1.0)
-            if (fiveHourRemaining in 0.0..100.0) {
-                results.add(QuotaResult.Success("codex", Quota("Codex 5h", (100.0 - fiveHourRemaining).toFloat(), 100f, "%")))
-            }
-
-            return results
+            return Parsed(results, warnings)
         }
     }
 
@@ -114,7 +174,8 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
 
         return try {
             val result = scraper.scrape(
-                USAGE_URL, JS_EXTRACT, isSettled = ::isSettled, graceExtraPolls = FIVE_HOUR_GRACE_POLLS
+                USAGE_URL, JS_EXTRACT, isSettled = ::isSettled, graceExtraPolls = GRACE_POLLS,
+                captureScript = CAPTURE_SCRIPT
             )
             if (result.sessionExpired) {
                 sessionStore.recordOutcome(SERVICE, SessionOutcome.EXPIRED)
@@ -126,8 +187,12 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
                 return listOf(QuotaResult.Error("codex", "Page load timed out"))
             }
 
-            Log.d(TAG, "Parsed: ${result.data.take(200)}")
-            val parsed = parseUsage(result.data)
+            val detailed = parse(result.data)
+            detailed.warnings.forEach { Log.w(TAG, "Cross-check: $it") }
+            val parsed = detailed.results
+            parsed.forEach {
+                if (it is QuotaResult.Success) Log.i(TAG, "Quota ${it.quota.name}=${it.quota.used}% source=${it.source}")
+            }
             // A completed parse alone isn't proof the session is fine — a login wall/interstitial
             // that isn't caught by the URL-based sessionExpired check could render *some* page and
             // parse to an all-Error result. Codex has no "page actually rendered" signal like
@@ -143,33 +208,22 @@ class CodexScraper(contextProvider: () -> Context, private val sessionStore: Ses
         }
     }
 
-    // The Codex usage page shows "Weekly usage limit\n\nN%\nremaining" (verified live 2026-07-17).
-    // Parse that labeled percentage — anchored to "weekly usage limit" so the per-model
-    // "100% remaining" rows below it can't be mistaken for the plan's weekly quota. Also look for
-    // an optional "5 hour usage limit ... N% remaining" block, same bounded-gap anchoring: OpenAI
-    // temporarily removed it 2026-07-13 (bd m5-u1d) but it's expected to come back, and when it
-    // does this picks it up with no code change needed.
+    // Hands Kotlin two independent inputs; parse() extracts, picks and cross-checks.
+    //  api: the rate_limit object of the page's own GET /backend-api/wham/usage response,
+    //       captured by CAPTURE_SCRIPT. Only rate_limit leaves the page: the rest of the body
+    //       holds account ids and the email.
+    //  text: the rendered page text, for the label-anchored fallback. Never logged.
     private val JS_EXTRACT = """
         (function() {
             try {
-                var text = document.body.innerText || '';
-                var weeklyRemaining = -1;
-                var fiveHourRemaining = -1;
-
-                var weekMatch = text.match(/weekly\s*usage\s*limit[\s\S]{0,40}?(\d+(?:\.\d+)?)\s*%[\s\S]{0,20}?remaining/i);
-                if (weekMatch) {
-                    weeklyRemaining = parseFloat(weekMatch[1]);
+                var api = null;
+                var cap = window.${ResponseCapture.GLOBAL} && window.${ResponseCapture.GLOBAL}['$CAPTURE_KEY'];
+                if (cap && cap.body && typeof cap.body === 'object') {
+                    var rl = cap.body.rate_limit;
+                    api = {rate_limit: (rl && typeof rl === 'object') ? rl : null};
                 }
-
-                var fiveMatch = text.match(/5\s*hour\s*usage\s*limit[\s\S]{0,40}?(\d+(?:\.\d+)?)\s*%[\s\S]{0,20}?remaining/i);
-                if (fiveMatch) {
-                    fiveHourRemaining = parseFloat(fiveMatch[1]);
-                }
-
-                return JSON.stringify({
-                    weeklyRemaining: weeklyRemaining,
-                    fiveHourRemaining: fiveHourRemaining
-                });
+                var text = ((document.body && document.body.innerText) || '').slice(0, 20000);
+                return JSON.stringify({api: api, text: text});
             } catch(e) {
                 return JSON.stringify({error: e.toString()});
             }
