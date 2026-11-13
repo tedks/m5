@@ -292,4 +292,27 @@ class QuotaSnapshotMergeTest {
         assertEquals(order1, order2)
         assertEquals(listOf("Claude 5h", "Claude wk", "Codex wk", "Actions"), order1)
     }
+
+    private fun model(service: String, name: String, fetchedAt: Long) =
+        QuotaResult.Success(service, Quota(name, 10f, 100f, "%"), fetchedAt, retainable = false)
+
+    @Test
+    fun `a non-retainable row missing from the fresh round is gone`() {
+        // PR #28 council (anthropic I3): a per-model row whose model left the plan must not
+        // linger for up to MAX_STALE_MS beside fresh rows.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(listOf(success("claude", "Claude wk", now - 5_000), model("claude", "Fable wk", now - 5_000)), now - 5_000)
+        val fresh = QuotaSnapshot(listOf(success("claude", "Claude wk", now)), now)
+        // Mutation-checked: the retainable filter removed -> red.
+        assertEquals(listOf("Claude wk"), fresh.mergedWith(previous, now).successes.map { it.quota.name })
+    }
+
+    @Test
+    fun `a retainable row missing from the fresh round is still retained (partial settle)`() {
+        // Twin of the test above: the same shape with the aggregate missing instead.
+        val now = 1_000_000L
+        val previous = QuotaSnapshot(listOf(success("claude", "Claude wk", now - 5_000), model("claude", "Fable wk", now - 5_000)), now - 5_000)
+        val fresh = QuotaSnapshot(listOf(model("claude", "Fable wk", now)), now)
+        assertEquals(listOf("Claude wk", "Fable wk"), fresh.mergedWith(previous, now).successes.map { it.quota.name })
+    }
 }

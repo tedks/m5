@@ -19,7 +19,13 @@ sealed class QuotaResult {
         val quota: Quota,
         val fetchedAt: Long = System.currentTimeMillis(),
         /** Where the number came from, for logs: "api" (the page's own JSON) or "dom". */
-        val source: String? = null
+        val source: String? = null,
+        /**
+         * Whether [mergedWith] may carry this quota over to a later round in which it is missing
+         * (a partial settle). False for rows whose absence means the quota is gone, e.g. Claude's
+         * per-model rows.
+         */
+        val retainable: Boolean = true
     ) : QuotaResult()
 
     data class Error(override val service: String, val message: String) : QuotaResult()
@@ -118,6 +124,8 @@ data class QuotaSnapshot(
  *    retained data is dropped. Unavailability is a *deliberate* state, and the display / BLE
  *    payload must never present deliberately-unavailable data as if it were live — showing
  *    hour-old numbers under a "logged out" service reads as current and misleads.
+ *  - A previous Success with [QuotaResult.Success.retainable] false is never retained: its
+ *    absence means the quota is gone (e.g. a per-model row whose model left the plan).
  *  - Retention additionally respects [MAX_STALE_MS]: a retained Success older than that relative
  *    to [now] is dropped regardless.
  *
@@ -139,6 +147,7 @@ fun QuotaSnapshot.mergedWith(previous: QuotaSnapshot, now: Long): QuotaSnapshot 
     val retainedStale = previous.successes
         .filter { (it.service to it.quota.name) !in freshSuccessKeys }
         .filter { it.service in activeServices }
+        .filter { it.retainable }
         .filter { now - it.fetchedAt <= MAX_STALE_MS }
 
     return copy(results = (results + retainedStale).sortedWith(QUOTA_RESULT_ORDER))
