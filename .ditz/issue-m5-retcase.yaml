@@ -11,8 +11,8 @@ type: task
 component: companion
 release:
 reporter: Ted Smith <tedks@riseup.net>
-status: unstarted
-disposition:
+status: closed
+disposition: fixed
 creation_time: 2026-11-12T22:22:00-00:00
 references: []
 log_events:
@@ -20,3 +20,9 @@ log_events:
   who: Ted Smith
   what: created
   comment: ""
+- time: 2026-11-13T03:58:45-00:00
+  who: Ted Smith
+  what: 'closed: fixed'
+  comment: 'Moot since #28 f3df981: per-model Claude rows are never retained (retainable=false);
+    only the fixed-spelling aggregates Claude 5h / Claude wk are, so case-variant
+    model rows cannot coexist. council #28 r7 anthropic N2.'
