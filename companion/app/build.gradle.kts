@@ -52,6 +52,9 @@ dependencies {
     // HTTP
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // WebView document-start scripts (captures the usage JSON the page itself fetches)
+    implementation("androidx.webkit:webkit:1.12.1")
+
     // JSON
     implementation("org.json:json:20231013")
 
