@@ -1,0 +1,20 @@
+id: m5-q-tower0-checkout
+title: Delete the stale m5 checkout on tower0?
+desc: 'Context: tower0:~/Projects/m5 is a never-committed plain checkout whose firmware
+  source equals commit 5847839 (May 2026), plus a re-downloadable M5Nemo release binary.
+  Nothing unique. framework0 is now the only machine needed (M5 reachable via a front
+  USB-C port). Options: (A) delete it; (B) leave it. Recommendation (CTO): A, by the
+  owner or on his say-so; nothing on tower0 was touched. Decides: Ted. Blocks: nothing.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T08:29:35-00:00
+references: []
+log_events:
+- time: 2026-11-13T08:29:35-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
