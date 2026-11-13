@@ -3,6 +3,7 @@ package com.quotawatch.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Message
@@ -183,9 +184,11 @@ private fun WebView.configureForLogin() {
     // credential back to window.opener with postMessage and then calls window.close(). Without
     // multi-window support WebView loads the popup INTO this WebView, which destroys the opener,
     // so that hand-off has nowhere to go and the screen stays white. With it enabled, window.open
-    // goes to WebChromeClient.onCreateWindow (see LoginWebViewScreen).
+    // goes to WebChromeClient.onCreateWindow (see LoginWebViewScreen). Google opens that popup
+    // from the button's click handler, so popups are allowed only in response to a user gesture:
+    // a page cannot open one unprompted (to cover the sign-in page or take the one popup slot).
     settings.setSupportMultipleWindows(true)
-    settings.javaScriptCanOpenWindowsAutomatically = true
+    settings.javaScriptCanOpenWindowsAutomatically = false
     CookieManager.getInstance().setAcceptCookie(true)
     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
     webViewClient = object : WebViewClient() {
@@ -237,9 +240,17 @@ fun LoginWebViewScreen(url: String, onDone: () -> Unit) {
                                 // Refuse a second concurrent popup; the page's window.open
                                 // returns null, the same as a blocked popup in a browser.
                                 if (popup != null) return false
+                                // Only a tap on an https page may open one (see configureForLogin).
+                                // No host allowlist: the login page can already navigate its own
+                                // frame anywhere, and a guessed list would silently break sign-in
+                                // providers that use popups.
+                                if (!isUserGesture) return false
+                                if (Uri.parse(view.url ?: "").scheme != "https") return false
                                 val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
                                 val child = WebView(view.context).apply {
                                     configureForLogin()
+                                    // No onCreateWindow here on purpose: a link inside the popup
+                                    // that opens yet another window (Help, Privacy) does nothing.
                                     webChromeClient = object : WebChromeClient() {
                                         override fun onCloseWindow(window: WebView) = closePopup(window)
                                     }
