@@ -1,0 +1,23 @@
+id: m5-q-wrist-extras
+title: Which extra quota facts go on the wrist, and confirm per-model row naming
+desc: 'Context: the usage pages now expose more than the app sends: reset times, usage
+  credits/spend, limit resets, per-product breakdown (survey table in PR #26). PR
+  #28 added per-model weekly rows named like ''Fable wk'' (<=15 bytes, max 4 rows).
+  Options: (A) keep the wrist to percentages only (today); (B) add reset times; (C)
+  add credits/spend. Recommendation (scrape lead, CTO agrees): A for now; confirm
+  the ''Fable wk'' naming. Note: ''Claude 5h'' is absent because the plan''s page
+  no longer shows a session limit; it returns if the page offers it. Decides: Ted.
+  Blocks: nothing.'
+type: task
+component: open-questions
+release:
+reporter: Ted Smith <tedks@riseup.net>
+status: unstarted
+disposition:
+creation_time: 2026-11-13T08:29:35-00:00
+references: []
+log_events:
+- time: 2026-11-13T08:29:35-00:00
+  who: Ted Smith
+  what: created
+  comment: ""
